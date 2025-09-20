@@ -541,8 +541,20 @@
         function getTeam(){ return (localStorage.getItem(KEY)||'').trim(); }
         function setTeam(v){
           const name=(v||'').trim();
-          if(name){ localStorage.setItem(KEY,name); teamTag.textContent='👥 ' + name; teamTag.classList.remove('hide'); }
-          else{ localStorage.removeItem(KEY); teamTag.textContent=''; teamTag.classList.add('hide'); }
+          if(name){
+            localStorage.setItem(KEY,name);
+            teamTag.textContent='👥 ' + name;
+            teamTag.classList.remove('hide');
+            // サーバーにチーム名を送信
+            if (typeof conn !== 'undefined' && conn.state === "Connected") {
+              conn.invoke('SetTeamName', name);
+            }
+          }
+          else{
+            localStorage.removeItem(KEY);
+            teamTag.textContent='';
+            teamTag.classList.add('hide');
+          }
           updateVoteButtons();
         }
         

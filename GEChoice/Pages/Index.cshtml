@@ -2,7 +2,7 @@
 @inject IConfiguration Config
 @{
     ViewData["Title"] = "GECどっちでSHOW - ホスト";
-    var joinUrl = Config["JoinUrl"] ?? "https://192.168.1.61:8080/vote";
+    var joinUrl = Config["JoinUrl"] ?? "https://192.168.1.19:8080/vote";
 }
 <!DOCTYPE html>
 <html lang="ja">
@@ -10,8 +10,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>@ViewData["Title"]</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.7/signalr.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
+    <script src="~/lib/signalr/signalr.min.js"></script>
+    <script src="~/lib/qrious/qrious.min.js"></script>
     <style>
         :root {
             --bg: #ffffff;
@@ -233,6 +233,13 @@
         </div>
 
         <div class="card">
+            <div class="muted">未回答チーム</div>
+            <div id="pending-clients">
+                <p class="muted">すべて回答済みです</p>
+            </div>
+        </div>
+
+        <div class="card">
             <div class="muted">問題別結果</div>
             <div id="question-results">
                 <p class="muted">回答終了後に表示されます</p>
@@ -416,8 +423,34 @@
             stopBtn.style.display = 'none';
             votingStatusDiv.innerHTML = '<span class="status-indicator status-closed"></span><span>回答受付停止中</span>';
           }
+
+        // 未回答チームの表示
+        displayPendingClients(s);
         }
-        
+
+        function displayPendingClients(s) {
+            const pendingDiv = document.getElementById('pending-clients');
+            const teams = s.teams || s.Teams || [];
+            const clientVotes = s.clientVotes || s.ClientVotes || {};
+
+            // 回答済みのclientId一覧
+            const answeredIds = Object.keys(clientVotes);
+
+            // 未回答チーム抽出
+            const pendingTeams = teams.filter(t => !answeredIds.includes(t.clientId || t.ClientId));
+
+            if (pendingTeams.length === 0) {
+                pendingDiv.innerHTML = '<p class="muted">すべて回答済みです</p>';
+            } else {
+                let html = '<ul>';
+                for (const t of pendingTeams) {
+                    html += `<li>${t.teamName || t.TeamName || (t.clientId || t.ClientId || '').substring(0,8)}</li>`;
+                }
+                html += '</ul>';
+                pendingDiv.innerHTML = html;
+            }
+        }
+
         function displayClientStatus(clientVotes) {
             if (Object.keys(clientVotes).length === 0) {
                 clientStatusDiv.innerHTML = '<p class="muted">まだ回答がありません</p>';

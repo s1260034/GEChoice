@@ -14,7 +14,7 @@ namespace GEChoice.Hubs
         public string Title { get; set; } = "";
         public List<VoteOption> Options { get; set; } = new();
     }
-    
+
     public class VoteState
     {
         public int CurrentIndex { get; set; }
@@ -24,6 +24,13 @@ namespace GEChoice.Hubs
         public DateTime? VotingStartTime { get; set; }
         public Dictionary<string, ClientVoteData> ClientVotes { get; set; } = new();
         public List<string> ActiveClients { get; set; } = new();
+        public List<TeamInfo> Teams { get; set; } = new(); // ★追加
+    }
+
+    public class TeamInfo
+    {
+        public string ClientId { get; set; } = "";
+        public string TeamName { get; set; } = "";
     }
 
     public class ClientVoteData
@@ -377,15 +384,16 @@ namespace GEChoice.Hubs
                 };
             }
 
-            return new VoteState 
-            { 
-                CurrentIndex = _currentIndex, 
-                Question = q, 
+            return new VoteState
+            {
+                CurrentIndex = _currentIndex,
+                Question = q,
                 Counts = counts,
                 IsVotingOpen = _isVotingOpen,
                 VotingStartTime = _votingStartTime,
                 ClientVotes = clientVotes,
-                ActiveClients = _answers.Keys.ToList()
+                ActiveClients = _answers.Keys.ToList(),
+                Teams = _teamNames.Select(x => new TeamInfo { ClientId = x.Key, TeamName = x.Value }).ToList() // ★追加
             };
         }
     }
