@@ -1,0 +1,936 @@
+@page "/vote"
+@{
+    ViewData["Title"] = "GECどっちでSHOW";
+}
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>@ViewData["Title"]</title>
+    <script src="~/lib/signalr/signalr.min.js"></script>
+    <style>
+        :root {
+            --bd: #e5e7eb;
+            --txt: #222;
+            --muted: #666;
+            --g1: #22c55e;
+            --g2: #16a34a;
+            --blue: #3b82f6;
+            --yellow: #eab308;
+            --red: #ef4444;
+        }
+
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent
+        }
+
+        html, body { height: 100% }
+
+        body {
+            margin: 0;
+            background: #fff;
+            color: var(--txt);
+            font-family: 'Inter',system-ui,sans-serif
+        }
+
+        header {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--bd);
+            background: #fff;
+        }
+
+        header .title {
+            font-weight: 800;
+            margin-left: 4px;
+        }
+
+        main {
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px
+        }
+
+        .card {
+            background: #fff;
+            border: 1px solid var(--bd);
+            border-radius: 14px;
+            box-shadow: 0 6px 18px rgba(0,0,0,.06);
+            padding: 16px
+        }
+
+        .multiplier-section {
+            margin-bottom: 16px;
+        }
+
+        .multiplier-title {
+            font-size: 14px;
+            color: var(--muted);
+            margin-bottom: 8px;
+        }
+
+        .multipliers {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+        }
+
+        .multiplier-btn {
+            appearance: none;
+            border: 2px solid var(--bd);
+            border-radius: 10px;
+            padding: 12px;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            background: #fff;
+            transition: all .15s ease;
+            position: relative;
+        }
+
+        .multiplier-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,.1);
+        }
+
+        .multiplier-btn.selected {
+            border-color: var(--g1);
+            background: linear-gradient(135deg, var(--g1), var(--g2));
+            color: #fff;
+        }
+
+        .multiplier-btn:disabled {
+            opacity: .4;
+            cursor: not-allowed;
+            background: #f3f4f6;
+        }
+
+        .multiplier-btn.used {
+            background: #f3f4f6;
+            border-color: #d1d5db;
+            color: #9ca3af;
+        }
+
+        .multiplier-btn .badge {
+            display: inline-block;
+            font-size: 20px;
+            margin-bottom: 4px;
+        }
+
+        .choices {
+            display: grid;
+            gap: 12px;
+            grid-template-columns: repeat(auto-fit,minmax(140px,1fr))
+        }
+
+        .choice {
+            appearance: none;
+            border: none;
+            border-radius: 14px;
+            padding: 16px;
+            font-size: 18px;
+            font-weight: 700;
+            cursor: pointer;
+            background: linear-gradient(90deg,var(--g1),var(--g2));
+            color: #fff;
+            box-shadow: 0 6px 16px rgba(34,197,94,.3);
+            transition: transform .08s ease
+        }
+
+        .choice:active {
+            transform: scale(.96)
+        }
+
+        .choice:disabled {
+            opacity: .5;
+            cursor: not-allowed
+        }
+
+        /* 押したボタンを強調、他は薄く */
+        .choice.selected {
+            box-shadow: 0 10px 22px rgba(34,197,94,.38);
+            filter: saturate(1.05);
+            position: relative;
+        }
+
+        .choice.selected::after {
+            content: "✓";
+            position: absolute;
+            right: 12px;
+            top: 10px;
+            font-weight: 800;
+        }
+
+        .choice.dim {
+            opacity: .55;
+        }
+
+        #msg {
+            color: #555;
+            font-size: 13px;
+            min-height: 20px;
+            padding: 8px;
+            background: #f9fafb;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .status {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            padding: 10px;
+            border: 1px solid var(--bd);
+            border-radius: 10px;
+            font-size: 13px;
+            color: #666
+        }
+
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ccc
+        }
+
+        .ok { background: #22c55e }
+        .ng { background: #ef4444 }
+        
+        .voting-closed {
+            text-align: center;
+            padding: 32px;
+            color: var(--muted);
+            font-size: 16px;
+        }
+        
+        .voting-closed-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .modal-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,.35);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 16px
+        }
+
+        .modal {
+            width: 100%;
+            max-width: 420px;
+            background: #fff;
+            border: 1px solid var(--bd);
+            border-radius: 14px;
+            box-shadow: 0 20px 50px rgba(0,0,0,.18);
+            padding: 18px
+        }
+
+        .modal h3 {
+            margin: 0 0 8px
+        }
+
+        .modal p {
+            margin: 0 0 14px;
+            color: var(--muted);
+            font-size: 14px
+        }
+
+        .input {
+            width: 100%;
+            padding: 12px 14px;
+            border: 1px solid var(--bd);
+            border-radius: 10px;
+            font-size: 16px
+        }
+
+        .row {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px
+        }
+
+        .btn {
+            flex: 1;
+            cursor: pointer;
+            padding: 10px 14px;
+            border-radius: 10px;
+            border: 1px solid var(--bd);
+            background: #fff;
+            font-weight: 700
+        }
+
+        .btn-acc {
+            border-color: transparent;
+            background: linear-gradient(90deg,var(--g1),var(--g2));
+            color: #fff
+        }
+
+        .hide { display: none }
+
+        .right {
+            position: absolute;
+            right: 12px;
+            top: 10px;
+            display: flex;
+            gap: 8px;
+            align-items: center
+        }
+
+        .tag {
+            border: 1px solid var(--bd);
+            border-radius: 999px;
+            padding: 6px 10px;
+            font-size: 12px;
+            color: #333;
+            background: #f9fafb
+        }
+
+        .linkbtn {
+            border: none;
+            background: none;
+            color: var(--g1);
+            font-weight: 700;
+            cursor: pointer
+        }
+
+        .linkbtn:active { opacity: .7 }
+
+        .selected-answer {
+            background: linear-gradient(90deg, #fbbf24, #f59e0b) !important;
+            position: relative;
+        }
+        
+        .selected-answer::after {
+            content: '✓ 選択済み';
+            position: absolute;
+            top: -10px;
+            right: 10px;
+            background: #f59e0b;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 700;
+        }
+        
+        .confirm-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            padding: 16px;
+        }
+        
+        .confirm-box {
+            background: white;
+            border-radius: 16px;
+            padding: 24px;
+            max-width: 400px;
+            width: 100%;
+            box-shadow: 0 20px 50px rgba(0,0,0,.25);
+        }
+        
+        .confirm-title {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 12px;
+            text-align: center;
+        }
+        
+        .confirm-message {
+            color: var(--muted);
+            margin-bottom: 20px;
+            line-height: 1.5;
+            text-align: center;
+        }
+        
+        .confirm-choice {
+            background: linear-gradient(135deg, #fbbf24, #f59e0b);
+            color: white;
+            padding: 20px;
+            border-radius: 14px;
+            font-size: 32px;
+            font-weight: 800;
+            text-align: center;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 20px rgba(245, 158, 11, 0.3);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .confirm-choice::before {
+            content: '✨';
+            position: absolute;
+            top: 8px;
+            left: 16px;
+            font-size: 20px;
+        }
+        
+        .confirm-choice::after {
+            content: '✨';
+            position: absolute;
+            top: 8px;
+            right: 16px;
+            font-size: 20px;
+        }
+        
+        .confirm-choice-detail {
+            display: flex;
+            justify-content: space-around;
+            margin-bottom: 20px;
+            padding: 12px;
+            background: #f9fafb;
+            border-radius: 10px;
+        }
+        
+        .confirm-choice-item {
+            text-align: center;
+        }
+        
+        .confirm-choice-label {
+            font-size: 12px;
+            color: var(--muted);
+            margin-bottom: 4px;
+        }
+        
+        .confirm-choice-value {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--g1);
+        }
+        
+        .confirm-buttons {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .confirm-btn {
+            flex: 1;
+            padding: 14px;
+            border: none;
+            border-radius: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            font-size: 16px;
+            transition: transform 0.1s ease;
+        }
+        
+        .confirm-btn:hover {
+            transform: translateY(-2px);
+        }
+        
+        .confirm-cancel {
+            background: #f3f4f6;
+            color: #666;
+        }
+        
+        .confirm-ok {
+            background: linear-gradient(90deg,var(--g1),var(--g2));
+            color: white;
+            box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3);
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="title">GECどっちでSHOW</div>
+        <div class="right">
+            <span id="teamTag" class="tag hide"></span>
+            <button id="editTeam" class="linkbtn">チーム名を設定</button>
+        </div>
+    </header>
+
+    <main>
+        <div class="card">
+            <h2 id="q-title">読み込み中…</h2>
+        </div>
+        
+        <div id="voting-area">
+            <div class="card">
+                <div class="multiplier-section">
+                    <div class="multiplier-title">点数を選択（全3問で各点数は1回ずつ使用可能）</div>
+                    <div class="multipliers">
+                        <button class="multiplier-btn" data-value="1">
+                            <div class="badge">1点</div>
+                            <div>1点</div>
+                        </button>
+                        <button class="multiplier-btn" data-value="2">
+                            <div class="badge">2点</div>
+                            <div>2点</div>
+                        </button>
+                        <button class="multiplier-btn" data-value="4">
+                            <div class="badge">4点</div>
+                            <div>4点</div>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="choices" id="choices"></div>
+            </div>
+        </div>
+        
+        <div id="voting-closed" class="card voting-closed hide">
+            <div class="voting-closed-icon">⏸️</div>
+            <div>回答受付停止中</div>
+            <div style="font-size:14px;margin-top:8px;">ホストが回答開始ボタンを押すまでお待ちください</div>
+        </div>
+        
+        <div id="msg">準備中...</div>
+        <div class="status"><span id="dot" class="dot"></span><span id="stxt">接続準備中…</span></div>
+    </main>
+
+    <!-- モーダル：チーム名入力 -->
+    <div id="backdrop" class="modal-backdrop">
+        <div class="modal">
+            <h3>チーム名を入力</h3>
+            <p>発表や集計で使う表示名です。あとから変更できます。</p>
+            <input id="teamInput" class="input" type="text" placeholder="例）チームA" maxlength="40" />
+            <div class="row">
+                <button id="cancelTeam" class="btn">あとで</button>
+                <button id="saveTeam" class="btn btn-acc">決定</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /* ===== 接続UI ===== */
+        const qTitle=document.getElementById('q-title');
+        const wrap=document.getElementById('choices');
+        const msg=document.getElementById('msg');
+        const dot=document.getElementById('dot');
+        const stxt=document.getElementById('stxt');
+        const votingArea=document.getElementById('voting-area');
+        const votingClosed=document.getElementById('voting-closed');
+        const setConn=(ok,t)=>{dot.className='dot '+(ok?'ok':'ng');stxt.textContent=t||(ok?'オンライン':'オフライン');};
+
+        /* ===== 倍率管理 ===== */
+        let selectedMultiplier = 1;
+        let usedMultipliers = [];
+        let isVotingOpen = false;
+        let hasVotedThisRound = false;
+        let currentSelectedOption = null;
+        let savedVotes = {}; // 各問題ごとの回答を保持
+        let currentQuestionIndex = 0;
+
+        /* ===== チーム名：localStorage 管理 ===== */
+        const KEY='gec_team_name';
+        const teamTag=document.getElementById('teamTag');
+        const editTeam=document.getElementById('editTeam');
+        const backdrop=document.getElementById('backdrop');
+        const teamInput=document.getElementById('teamInput');
+        const cancelTeam=document.getElementById('cancelTeam');
+        const saveTeam=document.getElementById('saveTeam');
+
+        function getTeam(){ return (localStorage.getItem(KEY)||'').trim(); }
+        function setTeam(v){
+          const name=(v||'').trim();
+          if(name){ localStorage.setItem(KEY,name); teamTag.textContent='👥 ' + name; teamTag.classList.remove('hide'); }
+          else{ localStorage.removeItem(KEY); teamTag.textContent=''; teamTag.classList.add('hide'); }
+          updateVoteButtons();
+        }
+        
+        function updateVoteButtons(){
+          const teamNow = getTeam();
+          const canVote = teamNow && isVotingOpen && selectedMultiplier > 0;
+          for(const b of document.querySelectorAll('.choice')) {
+            b.disabled = !canVote;
+          }
+        }
+        
+        function openModal(prefill){
+          teamInput.value=prefill||getTeam();
+          backdrop.style.display='flex';
+          setTimeout(()=> teamInput.focus(), 0);
+        }
+        function closeModal(){ backdrop.style.display='none'; }
+
+        editTeam.onclick=()=> openModal();
+        cancelTeam.onclick=()=> closeModal();
+        saveTeam.onclick=()=>{
+          const v=teamInput.value;
+          if(!v || !v.trim()){ teamInput.focus(); return; }
+          setTeam(v); closeModal(); msg.textContent='チーム名を設定しました';
+        };
+
+        window.addEventListener('load', ()=>{
+          const name=getTeam();
+          setTeam(name);
+          if(!name){ openModal(''); }
+          
+          // localStorageから保存されたデータを復元
+          const savedData = localStorage.getItem('gec_saved_votes');
+          const savedMultipliers = localStorage.getItem('gec_used_multipliers');
+          
+          if (savedData) {
+            try {
+              savedVotes = JSON.parse(savedData);
+            } catch (e) {
+              localStorage.removeItem('gec_saved_votes');
+            }
+          }
+          
+          if (savedMultipliers) {
+            try {
+              usedMultipliers = JSON.parse(savedMultipliers);
+              // 使用済み倍率のUIを更新
+              usedMultipliers.forEach(multiplier => {
+                const btn = document.querySelector(`.multiplier-btn[data-value="${multiplier}"]`);
+                if (btn) {
+                  btn.disabled = true;
+                  btn.classList.add('used');
+                }
+              });
+            } catch (e) {
+              localStorage.removeItem('gec_used_multipliers');
+            }
+          }
+          
+          // 倍率ボタンの設定
+          document.querySelectorAll('.multiplier-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+              if (btn.disabled || btn.classList.contains('used')) return;
+              
+              // 回答済みの場合は倍率変更を禁止
+              if (hasVotedThisRound) {
+                msg.textContent = '回答後は倍率を変更できません';
+                return;
+              }
+              
+              document.querySelectorAll('.multiplier-btn').forEach(b => b.classList.remove('selected'));
+              btn.classList.add('selected');
+              selectedMultiplier = parseInt(btn.dataset.value);
+              updateVoteButtons();
+              msg.textContent = `${selectedMultiplier}点を選択しました`;
+            });
+          });
+          
+          // デフォルトで×1を選択
+          document.querySelector('.multiplier-btn[data-value="1"]').classList.add('selected');
+        });
+
+        /* ===== SignalR ===== */
+        const conn=new signalR.HubConnectionBuilder()
+          .withUrl('/hub/vote', { transport: signalR.HttpTransportType.LongPolling })
+          .withAutomaticReconnect()
+          .build();
+
+        conn.on('StateUpdated', s=>{
+          const q=s.question||s.Question;
+          const opts=q.options||q.Options||[];
+          isVotingOpen = s.isVotingOpen || s.IsVotingOpen || false;
+          const newIndex = s.currentIndex || s.CurrentIndex || 0;
+          
+          // 問題が変わったとき
+          if (newIndex !== currentQuestionIndex) {
+            currentQuestionIndex = newIndex;
+            hasVotedThisRound = false;
+            currentSelectedOption = null;
+            
+            // 保存された回答があれば復元
+            if (savedVotes[currentQuestionIndex]) {
+              const saved = savedVotes[currentQuestionIndex];
+              currentSelectedOption = saved.option;
+              hasVotedThisRound = true;
+            }
+          }
+          
+          qTitle.textContent=q.title||q.Title||'';
+
+          // 投票エリアの表示/非表示
+          if (isVotingOpen) {
+            votingArea.classList.remove('hide');
+            votingClosed.classList.add('hide');
+            if (hasVotedThisRound) {
+              msg.textContent = `この問題は ${currentSelectedOption} (${savedVotes[currentQuestionIndex]?.multiplier || '?'}点) で回答済みです`;
+            } else {
+              msg.textContent = '点数を選択してから回答してください';
+            }
+          } else {
+            votingArea.classList.add('hide');
+            votingClosed.classList.remove('hide');
+            msg.textContent = '回答受付停止中';
+          }
+
+          wrap.innerHTML='';
+          const teamNow=getTeam();
+          for(const o of opts){
+            const label=o.label||o.Label;
+            if(!['A','B'].includes(label)) continue;
+            const b=document.createElement('button');
+            b.className='choice';
+            b.textContent=`${label} を選ぶ`;
+            b.disabled = !teamNow || !isVotingOpen || selectedMultiplier === 0;
+            // 回答済みの選択肢にスタイルを適用
+            if (currentSelectedOption === label) {
+              b.classList.add('selected-answer');
+            }
+            
+            b.onclick=()=> {
+              if (!selectedMultiplier || selectedMultiplier === 0) {
+                msg.textContent = '先に点数を選択してください';
+                return;
+              }
+              
+              if (hasVotedThisRound) {
+                msg.textContent = 'この問題は既に回答済みです';
+                return;
+              }
+              
+              // 確認モーダルを表示
+              showConfirmModal(label, teamNow);
+            };
+            wrap.appendChild(b);
+          }
+          setConn(true);
+          updateVoteButtons();
+        });
+        
+        conn.on('VotingStatusChanged', isOpen => {
+          isVotingOpen = isOpen;
+          if (isOpen) {
+            hasVotedThisRound = false;  // 新しい投票が開始されたらリセット
+            currentSelectedOption = null;
+            document.querySelectorAll('.choice').forEach(b => b.classList.remove('selected-answer'));
+            // 倍率ボタンのスタイルをリセット
+            document.querySelectorAll('.multiplier-btn').forEach(btn => {
+              if (!btn.classList.contains('used')) {
+                btn.style.pointerEvents = '';
+                btn.style.opacity = '';
+              }
+            });
+            votingArea.classList.remove('hide');
+            votingClosed.classList.add('hide');
+            msg.textContent = '点数を選択してから回答してください';
+          } else {
+            votingArea.classList.add('hide');
+            votingClosed.classList.remove('hide');
+            msg.textContent = '回答受付停止中';
+          }
+          updateVoteButtons();
+        });
+        
+        conn.on('MultiplierUsed', multiplier => {
+          usedMultipliers.push(multiplier);
+          hasVotedThisRound = true;  // 投票済みフラグを立てる
+          
+          // 現在の問題の回答を保存
+          savedVotes[currentQuestionIndex] = {
+            option: currentSelectedOption,
+            multiplier: multiplier
+          };
+          
+          // localStorageに保存
+          localStorage.setItem('gec_saved_votes', JSON.stringify(savedVotes));
+          localStorage.setItem('gec_used_multipliers', JSON.stringify(usedMultipliers));
+          
+          // 選択したボタンにスタイルを適用
+          if (currentSelectedOption) {
+            document.querySelectorAll('.choice').forEach(b => {
+              if (b.textContent === `${currentSelectedOption} を選ぶ`) {
+                b.classList.add('selected-answer');
+              }
+            });
+          }
+          
+          // 回答後はすべての倍率ボタンを無効化（使用済み倍率は別途処理）
+          document.querySelectorAll('.multiplier-btn').forEach(btn => {
+            const value = parseInt(btn.dataset.value);
+            if (usedMultipliers.includes(value)) {
+              btn.disabled = true;
+              btn.classList.add('used');
+              btn.classList.remove('selected');
+            } else if (hasVotedThisRound) {
+              // 回答済みの場合、未使用の倍率も無効化（ただし見た目は変えない）
+              btn.style.pointerEvents = 'none';
+              btn.style.opacity = '0.7';
+            }
+          });
+          
+          // 次の利用可能な倍率を自動選択
+          selectedMultiplier = 0;
+          for (const value of [1, 2, 4]) {
+            if (!usedMultipliers.includes(value)) {
+              selectedMultiplier = value;
+              document.querySelector(`.multiplier-btn[data-value="${value}"]`).classList.add('selected');
+              break;
+            }
+          }
+          updateVoteButtons();
+        });
+
+        // 最終結果表示の処理を追加
+        conn.on('GameResults', results => {
+          // 最終結果モーダルを表示
+          const modal = document.createElement('div');
+          modal.className = 'confirm-modal';
+          modal.style.display = 'flex';
+          modal.style.zIndex = '2000';
+          
+          let html = '<table style="width:100%;"><tr><th>順位</th><th>チーム名</th><th>合計点数</th><th>合計時間</th></tr>';
+          results.forEach((r, i) => {
+            const teamName = r.teamName || r.TeamName || (r.clientId || r.ClientId || '').substring(0, 8);
+            html += `<tr>
+              <td>${i + 1}位</td>
+              <td>${teamName}</td>
+              <td>${r.totalPoints || r.TotalPoints || 0}点</td>
+              <td>${((r.totalTime || r.TotalTime) || 0).toFixed(1)}秒</td>
+            </tr>`;
+          });
+          html += '</table>';
+          
+          modal.innerHTML = `
+            <div class="confirm-box" style="max-width:600px;">
+              <div class="confirm-title">🏆 最終結果</div>
+              <div style="margin:20px 0;overflow-x:auto;">${html}</div>
+              <div class="confirm-buttons">
+                <button class="confirm-btn confirm-ok" style="width:100%;">閉じる</button>
+              </div>
+            </div>
+          `;
+          
+          document.body.appendChild(modal);
+          
+          modal.querySelector('.confirm-ok').onclick = () => {
+            document.body.removeChild(modal);
+          };
+        });
+
+        conn.start()
+          .then(()=>{ setConn(true,'オンライン'); return conn.invoke('GetState'); })
+          .catch(()=> setConn(false,'接続できません'));
+
+        conn.onreconnecting(()=> setConn(false,'再接続中…'));
+        conn.onreconnected(()=> setConn(true,'オンライン'));
+        conn.onclose(()=> setConn(false,'切断されました'));
+
+        addEventListener('offline', ()=> setConn(false,'オフライン'));
+        addEventListener('online',  ()=> setConn(true,'オンライン'));
+        
+        // ゲームリセット時の処理
+        conn.on('GameReset', () => {
+            // すべての倍率をリセット
+            usedMultipliers = [];
+            selectedMultiplier = 1;
+            hasVotedThisRound = false;
+            currentSelectedOption = null;
+            savedVotes = {};
+            currentQuestionIndex = 0;
+            
+            // localStorage もクリア
+            localStorage.removeItem('gec_saved_votes');
+            localStorage.removeItem('gec_used_multipliers');
+            
+            // UIをリセット
+            document.querySelectorAll('.multiplier-btn').forEach(btn => {
+                btn.disabled = false;
+                btn.classList.remove('used');
+                btn.classList.remove('selected');
+            });
+            
+            // ×1を選択
+            document.querySelector('.multiplier-btn[data-value="1"]').classList.add('selected');
+            
+            // 選択済みスタイルをクリア
+            document.querySelectorAll('.choice').forEach(b => b.classList.remove('selected-answer'));
+            
+            msg.textContent = 'ゲームがリセットされました';
+        });
+        
+        // 回答が削除されたときの処理
+        conn.on('VoteDeleted', (clientId, deletedMultiplier) => {
+          if (clientId === conn.connectionId) {
+            hasVotedThisRound = false;
+            currentSelectedOption = null;
+            document.querySelectorAll('.choice').forEach(b => b.classList.remove('selected-answer'));
+            msg.textContent = '回答が削除されました。再度回答できます';
+            
+            // 削除された倍率を再利用可能にする
+            if (deletedMultiplier && usedMultipliers.includes(deletedMultiplier)) {
+              const index = usedMultipliers.indexOf(deletedMultiplier);
+              if (index > -1) {
+                usedMultipliers.splice(index, 1);
+              }
+              
+              const btn = document.querySelector(`.multiplier-btn[data-value="${deletedMultiplier}"]`);
+              if (btn) {
+                btn.disabled = false;
+                btn.classList.remove('used');
+                
+                // 自動で削除された倍率を選択
+                if (selectedMultiplier === 0) {
+                  btn.classList.add('selected');
+                  selectedMultiplier = deletedMultiplier;
+                  msg.textContent = `${selectedMultiplier}点が再利用可能になりました`;
+                }
+              }
+            }
+            updateVoteButtons();
+          }
+        });
+        
+        // 確認モーダル関数
+        function showConfirmModal(label, teamName) {
+          const modal = document.createElement('div');
+          modal.className = 'confirm-modal';
+          modal.style.display = 'flex';
+          
+          modal.innerHTML = `
+            <div class="confirm-box">
+              <div class="confirm-title">📝 回答確認</div>
+              <div class="confirm-message">
+                この選択で回答します。<br>
+                一度回答すると変更できません。
+              </div>
+              <div class="confirm-choice">${label}</div>
+              <div class="confirm-choice-detail">
+                <div class="confirm-choice-item">
+                  <div class="confirm-choice-label">チーム名</div>
+                  <div class="confirm-choice-value">${teamName || '未設定'}</div>
+                </div>
+                <div class="confirm-choice-item">
+                  <div class="confirm-choice-label">使用ポイント</div>
+                  <div class="confirm-choice-value">${selectedMultiplier}点</div>
+                </div>
+              </div>
+              <div class="confirm-buttons">
+                <button class="confirm-btn confirm-cancel">戻る</button>
+                <button class="confirm-btn confirm-ok">確定する ✓</button>
+              </div>
+            </div>
+          `;
+          
+          document.body.appendChild(modal);
+          
+          modal.querySelector('.confirm-cancel').onclick = () => {
+            document.body.removeChild(modal);
+          };
+          
+          modal.querySelector('.confirm-ok').onclick = () => {
+            currentSelectedOption = label;
+            conn.invoke('SubmitWithMultiplier', label, selectedMultiplier, teamName).then(()=>{
+              msg.textContent=`${teamName?('['+teamName+'] '):''}${label} を ${selectedMultiplier}点で選択しました`;
+              try{ navigator.vibrate && navigator.vibrate(15); }catch{}
+            });
+            document.body.removeChild(modal);
+          };
+        }
+    </script>
+</body>
+</html>

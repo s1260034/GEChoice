@@ -1,0 +1,555 @@
+@page "/"
+@inject IConfiguration Config
+@{
+    ViewData["Title"] = "GECどっちでSHOW - ホスト";
+    var joinUrl = Config["JoinUrl"] ?? "https://192.168.1.61:8080/vote";
+}
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@ViewData["Title"]</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.7/signalr.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
+    <style>
+        :root {
+            --bg: #ffffff;
+            --card: #ffffff;
+            --bd: #e5e7eb;
+            --txt: #222;
+            --muted: #666;
+            --g1: #22c55e;
+            --g2: #00B09F;
+            --red: #ef4444;
+            --blue: #3b82f6;
+        }
+
+        * { box-sizing: border-box }
+
+        body {
+            margin: 0;
+            font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--txt);
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--bd);
+            background: #fff;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .brand { font-weight: 800 }
+
+        .btn {
+            cursor: pointer;
+            padding: 10px 14px;
+            border-radius: 12px;
+            border: 1px solid var(--g1);
+            background: linear-gradient(90deg,var(--g1),var(--g2));
+            color: #fff;
+            font-weight: 700;
+            transition: transform .08s ease;
+        }
+
+        .btn:hover { transform: translateY(-1px); }
+        
+        .btn-start {
+            background: linear-gradient(90deg, var(--g1), var(--g2));
+            border-color: var(--g1);
+        }
+        
+        .btn-stop {
+            background: linear-gradient(90deg, var(--red), #dc2626);
+            border-color: var(--red);
+        }
+        
+        .btn-result {
+            background: linear-gradient(90deg, var(--blue), #2563eb);
+            border-color: var(--blue);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 16px;
+            display: grid;
+            gap: 16px;
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--bd);
+            border-radius: 16px;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.06);
+            padding: 16px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit,minmax(220px,1fr));
+            gap: 12px
+        }
+
+        .opt {
+            padding: 12px;
+            border: 1px solid var(--bd);
+            border-radius: 12px;
+            background: #f9fafb;
+        }
+
+        .num {
+            font-size: 40px;
+            font-weight: 800;
+            color: var(--g2);
+        }
+
+        .muted { color: var(--muted) }
+
+        .qr {
+            display: flex;
+            gap: 18px;
+            align-items: center;
+            flex-wrap: wrap
+        }
+
+        .qr canvas {
+            background: #fff;
+            border: 1px solid var(--bd);
+            border-radius: 12px;
+        }
+
+        a {
+            color: var(--g1);
+            font-weight: 600;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .status-open { background: var(--g1); }
+        .status-closed { background: var(--red); }
+        
+        .timer {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--g2);
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 12px;
+        }
+        
+        th, td {
+            text-align: left;
+            padding: 8px;
+            border-bottom: 1px solid var(--bd);
+        }
+        
+        th { font-weight: 700; }
+        
+        .no-vote { color: var(--muted); font-style: italic; }
+        
+        .multiplier-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 700;
+            margin-left: 4px;
+        }
+        
+        .multiplier-1 { background: #e5e7eb; }
+        .multiplier-2 { background: #fef3c7; }
+        .multiplier-4 { background: #fecaca; }
+        
+        .delete-btn {
+            background: #ef4444;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 700;
+        }
+        
+        .delete-btn:hover {
+            background: #dc2626;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="brand">GECどっちでSHOW - ホスト画面</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button id="show-qr-modal" class="btn">QR</button>
+            <button id="start-voting" class="btn btn-start">回答開始</button>
+            <button id="stop-voting" class="btn btn-stop" style="display:none;">回答終了</button>
+            <button id="prev" class="btn">前の問題</button>
+            <button id="next" class="btn">次の問題</button>
+            <button id="reset" class="btn">リセット</button>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                    <div class="muted">問題 <span id="q-num">1</span></div>
+                    <h2 id="q-title" style="margin:6px 0 12px;">読み込み中…</h2>
+                </div>
+                <div style="text-align:right;">
+                    <div class="muted">ステータス</div>
+                    <div id="voting-status">
+                        <span class="status-indicator status-closed"></span>
+                        <span>回答受付停止中</span>
+                    </div>
+                    <div id="timer" class="timer" style="display:none;">0秒</div>
+                </div>
+            </div>
+            <div id="opts" class="grid"></div>
+        </div>
+
+        <div class="card">
+            <div class="muted">参加者の回答状況</div>
+            <div id="client-status">
+                <p class="muted">まだ回答がありません</p>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="muted">問題別結果</div>
+            <div id="question-results">
+                <p class="muted">回答終了後に表示されます</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="final-results-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.8);z-index:1000;">
+        <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:white;padding:32px;border-radius:16px;max-width:800px;width:90%;max-height:80vh;overflow-y:auto;">
+            <h2>最終結果</h2>
+            <div id="final-results-content"></div>
+            <button onclick="document.getElementById('final-results-modal').style.display='none'" class="btn" style="margin-top:16px;">閉じる</button>
+        </div>
+    </div>
+    
+    <!-- QRコードモーダル -->
+    <div id="qr-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.8);z-index:1000;">
+        <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:white;padding:32px;border-radius:16px;max-width:500px;width:90%;">
+            <h2 style="margin-top:0;">参加用QRコード</h2>
+            <div style="text-align:center;margin:24px 0;">
+                <canvas id="qr" width="250" height="250"></canvas>
+            </div>
+            <div style="text-align:center;margin:16px 0;">
+                <div style="color:#666;font-size:14px;margin-bottom:8px;">参加URL</div>
+                <div style="background:#f3f4f6;padding:12px;border-radius:8px;word-break:break-all;">
+                    <a id="join-link" href="@joinUrl" target="_blank" style="color:#22c55e;font-weight:600;text-decoration:none;">@joinUrl</a>
+                </div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:24px;">
+                <button id="edit-url" class="btn" style="flex:1;">URLを変更</button>
+                <button onclick="document.getElementById('qr-modal').style.display='none'" class="btn" style="flex:1;background:linear-gradient(90deg,#22c55e,#16a34a);color:white;border:none;">閉じる</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const conn = new signalR.HubConnectionBuilder()
+          .withUrl("/hub/vote", { transport: signalR.HttpTransportType.LongPolling })
+          .withAutomaticReconnect().build();
+
+        const qTitle = document.getElementById('q-title');
+        const qNum = document.getElementById('q-num');
+        const optsDiv = document.getElementById('opts');
+        const clientStatusDiv = document.getElementById('client-status');
+        const questionResultsDiv = document.getElementById('question-results');
+        const votingStatusDiv = document.getElementById('voting-status');
+        const timerDiv = document.getElementById('timer');
+        const startBtn = document.getElementById('start-voting');
+        const stopBtn = document.getElementById('stop-voting');
+        
+        let timerInterval = null;
+        let votingStartTime = null;
+        let currentState = null;
+        let questionResults = {};
+        let previousClientVotes = {}; // 前の画面に戻ったときに参加者の回答状況を保持
+
+        let joinUrl = "@joinUrl";
+        let qr = null;
+        const joinLink = document.getElementById('join-link');
+        const qrModal = document.getElementById('qr-modal');
+        const showQrModalBtn = document.getElementById('show-qr-modal');
+        
+        joinLink.textContent = joinUrl; 
+        joinLink.href = joinUrl;
+        
+        // QRモーダル表示ボタン
+        showQrModalBtn.onclick = () => {
+            // 初回表示時のみQRコードを生成
+            if (!qr) {
+                qr = new QRious({ element: document.getElementById('qr'), value: joinUrl, size: 250 });
+            }
+            qrModal.style.display = 'block';
+        };
+        
+        // モーダル背景クリックで閉じる
+        qrModal.onclick = (e) => {
+            if (e.target === qrModal) {
+                qrModal.style.display = 'none';
+            }
+        };
+        
+        document.getElementById('edit-url').onclick = () => {
+          const v = prompt("参加URLを入力", joinUrl) || joinUrl;
+          joinUrl = v; 
+          if (qr) qr.set({ value: joinUrl }); 
+          joinLink.textContent = joinUrl; 
+          joinLink.href = joinUrl;
+        };
+
+        conn.on("StateUpdated", s => {
+            currentState = s;
+            // 現在の問題の回答を保存
+            if (s.clientVotes && Object.keys(s.clientVotes).length > 0) {
+                previousClientVotes[s.currentIndex || s.CurrentIndex || 0] = s.clientVotes;
+            }
+            render(s);
+        });
+        
+        conn.on("VotingStatusChanged", isOpen => {
+            if (isOpen) {
+                votingStartTime = new Date();
+                startTimer();
+                startBtn.style.display = 'none';
+                stopBtn.style.display = 'inline-block';
+                votingStatusDiv.innerHTML = '<span class="status-indicator status-open"></span><span>回答受付中</span>';
+            } else {
+                stopTimer();
+                startBtn.style.display = 'inline-block';
+                stopBtn.style.display = 'none';
+                votingStatusDiv.innerHTML = '<span class="status-indicator status-closed"></span><span>回答受付停止中</span>';
+            }
+        });
+        
+        conn.on("QuestionResults", (index, results) => {
+            questionResults[index] = results;
+            displayQuestionResults(index, results);
+        });
+        
+        conn.on("GameResults", results => {
+            displayFinalResults(results);
+        });
+        
+        conn.on("VoteDeleted", clientId => {
+            // 回答が削除されたことを通知
+            console.log(`Vote deleted for client: ${clientId}`);
+        });
+        
+        conn.on("ShowAlert", message => {
+            alert(message);
+        });
+        
+        conn.start().then(()=> conn.invoke("GetState")).catch(console.error);
+
+        function render(s){
+          const q = s.question || s.Question;
+          const opts = q.options || q.Options || [];
+          const counts = s.counts || s.Counts || {};
+          const clientVotes = s.clientVotes || s.ClientVotes || {};
+          const isVotingOpen = s.isVotingOpen || s.IsVotingOpen;
+          
+          qTitle.textContent = q.title || q.Title || '';
+          const currentQuestionNum = (s.currentIndex || s.CurrentIndex || 0) + 1;
+          qNum.textContent = currentQuestionNum;
+          
+          // 問題番号に応じてボタンテキストを更新
+          const nextBtn = document.getElementById('next');
+          if (currentQuestionNum === 3) {
+              nextBtn.textContent = '最終結果';
+              nextBtn.className = 'btn btn-result';
+          } else {
+              nextBtn.textContent = '次の問題';
+              nextBtn.className = 'btn';
+          }
+
+          optsDiv.innerHTML = '';
+          for(const o of opts){
+            const label = o.label ?? o.Label;
+            const box = document.createElement('div');
+            box.className = 'opt';
+            box.innerHTML = `<div style="font-weight:800;margin:6px 0;">${label}</div>
+                             <div class="num">${counts[label] ?? 0}</div>`;
+            optsDiv.appendChild(box);
+          }
+          
+          // クライアント状況の表示（保存された回答がある場合はそれも含める）
+          const currentIndex = s.currentIndex || s.CurrentIndex || 0;
+          const displayVotes = previousClientVotes[currentIndex] || clientVotes;
+          displayClientStatus(displayVotes);
+          
+          // 投票状態の更新
+          if (isVotingOpen) {
+            startBtn.style.display = 'none';
+            stopBtn.style.display = 'inline-block';
+            votingStatusDiv.innerHTML = '<span class="status-indicator status-open"></span><span>回答受付中</span>';
+            if (!timerInterval && s.votingStartTime) {
+                votingStartTime = new Date(s.votingStartTime || s.VotingStartTime);
+                startTimer();
+            }
+          } else {
+            startBtn.style.display = 'inline-block';
+            stopBtn.style.display = 'none';
+            votingStatusDiv.innerHTML = '<span class="status-indicator status-closed"></span><span>回答受付停止中</span>';
+          }
+        }
+        
+        function displayClientStatus(clientVotes) {
+            if (Object.keys(clientVotes).length === 0) {
+                clientStatusDiv.innerHTML = '<p class="muted">まだ回答がありません</p>';
+                return;
+            }
+            
+            let html = '<table><tr><th>チーム名</th><th>選択</th><th>倍率</th><th>回答時間</th><th>操作</th></tr>';
+            for (const [id, data] of Object.entries(clientVotes)) {
+                const teamName = data.teamName || data.TeamName || id.substring(0, 8);
+                const multiplier = data.multiplier || data.Multiplier || 1;
+                const option = data.selectedOption || data.SelectedOption || '-';
+                const responseTime = data.responseTime || data.ResponseTime || 0;
+                html += `<tr>
+                    <td>${teamName}</td>
+                    <td>${option}</td>
+                    <td><span class="multiplier-badge multiplier-${multiplier}">×${multiplier}</span></td>
+                    <td>${responseTime > 0 ? responseTime.toFixed(1) + '秒' : '-'}</td>
+                    <td><button class="delete-btn" onclick="deleteVote('${id}')">削除</button></td>
+                </tr>`;
+            }
+            html += '</table>';
+            clientStatusDiv.innerHTML = html;
+        }
+        
+        function displayQuestionResults(index, results) {
+            if (!results || results.length === 0) return;
+            
+            let html = `<h3>問題${index + 1}の結果</h3><table><tr><th>チーム名</th><th>選択</th><th>倍率</th><th>回答時間</th><th>獲得点数</th></tr>`;
+            for (const data of results) {
+                const teamName = data.teamName || data.TeamName || (data.clientId || data.ClientId || '').substring(0, 8);
+                html += `<tr>
+                    <td>${teamName}</td>
+                    <td>${data.selectedOption || data.SelectedOption}</td>
+                    <td><span class="multiplier-badge multiplier-${data.multiplier || data.Multiplier}">×${data.multiplier || data.Multiplier}</span></td>
+                    <td>${((data.responseTime || data.ResponseTime) || 0).toFixed(1)}秒</td>
+                    <td>${data.points || data.Points || 0}点</td>
+                </tr>`;
+            }
+            html += '</table>';
+            questionResultsDiv.innerHTML = html;
+        }
+        
+        function displayFinalResults(results) {
+            let html = '<table><tr><th>順位</th><th>チーム名</th><th>合計点数</th><th>合計回答時間</th></tr>';
+            results.forEach((r, i) => {
+                const teamName = r.teamName || r.TeamName || (r.clientId || r.ClientId || '').substring(0, 8);
+                html += `<tr>
+                    <td>${i + 1}位</td>
+                    <td>${teamName}</td>
+                    <td>${r.totalPoints || r.TotalPoints || 0}点</td>
+                    <td>${((r.totalTime || r.TotalTime) || 0).toFixed(1)}秒</td>
+                </tr>`;
+            });
+            html += '</table>';
+            document.getElementById('final-results-content').innerHTML = html;
+            document.getElementById('final-results-modal').style.display = 'block';
+        }
+        
+        function startTimer() {
+            timerInterval = setInterval(() => {
+                if (votingStartTime) {
+                    const elapsed = Math.floor((new Date() - votingStartTime) / 1000);
+                    timerDiv.textContent = `${elapsed}秒`;
+                    timerDiv.style.display = 'block';
+                }
+            }, 100);
+        }
+        
+        function stopTimer() {
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+            timerDiv.style.display = 'none';
+        }
+
+        document.getElementById('start-voting').onclick = () => conn.invoke("StartVoting");
+        document.getElementById('stop-voting').onclick = () => conn.invoke("StopVoting");
+        document.getElementById('prev').onclick = () => {
+            const currentQuestionNum = parseInt(qNum.textContent);
+            const nextBtn = document.getElementById('next');
+            
+            // 問3から戻る時にボタンテキストを元に戻す
+            if (currentQuestionNum === 3) {
+                nextBtn.textContent = '次の問題';
+                nextBtn.className = 'btn';
+            }
+            
+            conn.invoke("PrevQuestion");
+        };
+        document.getElementById('next').onclick = () => {
+            // 問3の場合は最終結果を表示
+            const currentQuestionNum = parseInt(qNum.textContent);
+            const nextBtn = document.getElementById('next');
+            
+            if (currentQuestionNum === 3) {
+                conn.invoke("GetGameResults");
+            } else {
+                conn.invoke("NextQuestion");
+                // 問2から問3への遷移時にボタンテキストを変更
+                if (currentQuestionNum === 2) {
+                    nextBtn.textContent = '最終結果';
+                    nextBtn.className = 'btn btn-result';
+                }
+            }
+        };
+        document.getElementById('reset').onclick = () => {
+            if (confirm('すべてのデータをリセットしますか？')) {
+                conn.invoke("ResetCounts");
+                questionResults = {};
+                questionResultsDiv.innerHTML = '<p class="muted">回答終了後に表示されます</p>';
+                // タイマーもリセット
+                stopTimer();
+                votingStartTime = null;
+                timerDiv.textContent = '0秒';
+            }
+        };
+        
+        // 回答削除関数
+        function deleteVote(clientId) {
+            if (confirm('このチームの回答を削除しますか？')) {
+                conn.invoke("DeleteClientVote", clientId);
+            }
+        }
+        
+        // 削除通知を受け取る
+        conn.on("VoteDeleted", clientId => {
+            if (currentState) {
+                delete currentState.clientVotes[clientId];
+                render(currentState);
+            }
+        });
+    </script>
+</body>
+</html>

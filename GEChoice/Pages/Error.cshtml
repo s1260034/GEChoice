@@ -1,0 +1,40 @@
+﻿@page
+@model Microsoft.AspNetCore.Mvc.RazorPages.PageModel
+@{
+    ViewData["Title"] = "エラー";
+}
+<style>
+    body {
+        font-family: sans-serif;
+        background: #f9fafb;
+        color: #111827;
+        text-align: center;
+        padding: 40px;
+    }
+
+    .card {
+        display: inline-block;
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        padding: 30px;
+        border-radius: 16px;
+        box-shadow: 0 4px 12px rgba(0,0,0,.08);
+    }
+
+    h1 {
+        color: #b91c1c;
+        margin-bottom: 12px;
+    }
+
+    a {
+        color: #15803d;
+        text-decoration: none;
+        font-weight: 600;
+    }
+</style>
+
+<div class="card">
+    <h1>エラーが発生しました</h1>
+    <p>申し訳ありません。処理中に問題が発生しました。</p>
+    <p><a href="/">トップページに戻る</a></p>
+</div>
