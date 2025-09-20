@@ -202,7 +202,6 @@
             <button id="stop-voting" class="btn btn-stop" style="display:none;">回答終了</button>
             <button id="show-answer-list" class="btn" style="display:none;background:#3b82f6;">回答一覧</button>
             <button id="prev" class="btn">前の問題</button>
-            <button id="next" class="btn">次の問題</button>
             <button id="reset" class="btn">リセット</button>
         </div>
     </header>
@@ -399,15 +398,7 @@
           const currentQuestionNum = (s.currentIndex || s.CurrentIndex || 0) + 1;
           qNum.textContent = currentQuestionNum;
           
-          // 問題番号に応じてボタンテキストを更新
-          const nextBtn = document.getElementById('next');
-          if (currentQuestionNum === 3) {
-              nextBtn.textContent = '最終結果';
-              nextBtn.className = 'btn btn-result';
-          } else {
-              nextBtn.textContent = '次の問題';
-              nextBtn.className = 'btn';
-          }
+          // 問題番号に応じた処理（nextボタンは削除済み）
 
           optsDiv.innerHTML = '';
           for(const o of opts){
@@ -523,33 +514,9 @@
             document.getElementById('show-answer-list').style.display = 'inline-block';
         };
         document.getElementById('prev').onclick = () => {
-            const currentQuestionNum = parseInt(qNum.textContent);
-            const nextBtn = document.getElementById('next');
-            
-            // 問3から戻る時にボタンテキストを元に戻す
-            if (currentQuestionNum === 3) {
-                nextBtn.textContent = '次の問題';
-                nextBtn.className = 'btn';
-            }
-            
             conn.invoke("PrevQuestion");
         };
-        document.getElementById('next').onclick = () => {
-            // 問3の場合は最終結果を表示
-            const currentQuestionNum = parseInt(qNum.textContent);
-            const nextBtn = document.getElementById('next');
-            
-            if (currentQuestionNum === 3) {
-                conn.invoke("GetGameResults");
-            } else {
-                conn.invoke("NextQuestion");
-                // 問2から問3への遷移時にボタンテキストを変更
-                if (currentQuestionNum === 2) {
-                    nextBtn.textContent = '最終結果';
-                    nextBtn.className = 'btn btn-result';
-                }
-            }
-        };
+        // nextボタンは削除済み（回答一覧モーダル内のボタンで次へ進む）
         document.getElementById('reset').onclick = () => {
             if (confirm('すべてのデータをリセットしますか？')) {
                 conn.invoke("ResetCounts");
@@ -575,17 +542,11 @@
             document.getElementById('show-answer-list').style.display = 'none';
 
             const currentQuestionNum = parseInt(qNum.textContent);
-            const nextBtn = document.getElementById('next');
 
             if (currentQuestionNum === 3) {
                 conn.invoke("GetGameResults");
             } else {
                 conn.invoke("NextQuestion");
-                // 問2から問3への遷移時にボタンテキストを変更
-                if (currentQuestionNum === 2) {
-                    nextBtn.textContent = '最終結果';
-                    nextBtn.className = 'btn btn-result';
-                }
             }
         };
 
