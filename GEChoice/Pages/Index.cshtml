@@ -200,8 +200,8 @@
             <button id="show-qr-modal" class="btn">QR</button>
             <button id="start-voting" class="btn btn-start">回答開始</button>
             <button id="stop-voting" class="btn btn-stop" style="display:none;">回答終了</button>
+            <button id="show-answer-list" class="btn" style="display:none;background:#3b82f6;">回答一覧</button>
             <button id="prev" class="btn">前の問題</button>
-            <button id="next" class="btn">次の問題</button>
             <button id="reset" class="btn">リセット</button>
         </div>
     </header>
@@ -264,6 +264,21 @@
             <div style="display:flex;gap:8px;margin-top:24px;">
                 <button id="edit-url" class="btn" style="flex:1;">URLを変更</button>
                 <button onclick="document.getElementById('qr-modal').style.display='none'" class="btn" style="flex:1;background:linear-gradient(90deg,#22c55e,#16a34a);color:white;border:none;">閉じる</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 回答一覧モーダル -->
+    <div id="answer-list-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.8);z-index:1000;">
+        <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:white;padding:32px;border-radius:16px;max-width:800px;width:90%;max-height:80vh;overflow-y:auto;">
+            <h2 style="margin-top:0;margin-bottom:8px;">回答一覧</h2>
+            <div id="answer-list-question" style="color:#666;margin-bottom:20px;font-size:18px;font-weight:600;"></div>
+            <div id="answer-list-content" style="margin-bottom:24px;">
+                <!-- 回答内容がここに表示される -->
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button onclick="document.getElementById('answer-list-modal').style.display='none'" class="btn" style="background:#6b7280;color:white;border:none;">閉じる</button>
+                <button id="proceed-next-question" class="btn" style="background:linear-gradient(90deg,#22c55e,#16a34a);color:white;border:none;">次の問題へ進む</button>
             </div>
         </div>
     </div>
@@ -338,6 +353,8 @@
                 startBtn.style.display = 'none';
                 stopBtn.style.display = 'inline-block';
                 votingStatusDiv.innerHTML = '<span class="status-indicator status-open"></span><span>回答受付中</span>';
+                // 新しい投票開始時は回答一覧ボタンを非表示
+                document.getElementById('show-answer-list').style.display = 'none';
             } else {
                 stopTimer();
                 startBtn.style.display = 'inline-block';
@@ -354,12 +371,16 @@
         conn.on("GameResults", results => {
             displayFinalResults(results);
         });
-        
+
+        conn.on("AnswerListReceived", answerList => {
+            displayAnswerList(answerList);
+        });
+
         conn.on("VoteDeleted", clientId => {
             // 回答が削除されたことを通知
             console.log(`Vote deleted for client: ${clientId}`);
         });
-        
+
         conn.on("ShowAlert", message => {
             alert(message);
         });
@@ -377,15 +398,7 @@
           const currentQuestionNum = (s.currentIndex || s.CurrentIndex || 0) + 1;
           qNum.textContent = currentQuestionNum;
           
-          // 問題番号に応じてボタンテキストを更新
-          const nextBtn = document.getElementById('next');
-          if (currentQuestionNum === 3) {
-              nextBtn.textContent = '最終結果';
-              nextBtn.className = 'btn btn-result';
-          } else {
-              nextBtn.textContent = '次の問題';
-              nextBtn.className = 'btn';
-          }
+          // 問題番号に応じた処理（nextボタンは削除済み）
 
           optsDiv.innerHTML = '';
           for(const o of opts){
@@ -495,35 +508,15 @@
         }
 
         document.getElementById('start-voting').onclick = () => conn.invoke("StartVoting");
-        document.getElementById('stop-voting').onclick = () => conn.invoke("StopVoting");
+        document.getElementById('stop-voting').onclick = () => {
+            conn.invoke("StopVoting");
+            // 回答一覧ボタンを表示
+            document.getElementById('show-answer-list').style.display = 'inline-block';
+        };
         document.getElementById('prev').onclick = () => {
-            const currentQuestionNum = parseInt(qNum.textContent);
-            const nextBtn = document.getElementById('next');
-            
-            // 問3から戻る時にボタンテキストを元に戻す
-            if (currentQuestionNum === 3) {
-                nextBtn.textContent = '次の問題';
-                nextBtn.className = 'btn';
-            }
-            
             conn.invoke("PrevQuestion");
         };
-        document.getElementById('next').onclick = () => {
-            // 問3の場合は最終結果を表示
-            const currentQuestionNum = parseInt(qNum.textContent);
-            const nextBtn = document.getElementById('next');
-            
-            if (currentQuestionNum === 3) {
-                conn.invoke("GetGameResults");
-            } else {
-                conn.invoke("NextQuestion");
-                // 問2から問3への遷移時にボタンテキストを変更
-                if (currentQuestionNum === 2) {
-                    nextBtn.textContent = '最終結果';
-                    nextBtn.className = 'btn btn-result';
-                }
-            }
-        };
+        // nextボタンは削除済み（回答一覧モーダル内のボタンで次へ進む）
         document.getElementById('reset').onclick = () => {
             if (confirm('すべてのデータをリセットしますか？')) {
                 conn.invoke("ResetCounts");
@@ -533,9 +526,77 @@
                 stopTimer();
                 votingStartTime = null;
                 timerDiv.textContent = '0秒';
+                // 回答一覧ボタンを非表示
+                document.getElementById('show-answer-list').style.display = 'none';
             }
         };
-        
+
+        // 回答一覧ボタンのイベントハンドラ
+        document.getElementById('show-answer-list').onclick = () => {
+            conn.invoke("ShowAnswerList");
+        };
+
+        // 次の問題へ進むボタン（回答一覧モーダル内）
+        document.getElementById('proceed-next-question').onclick = () => {
+            document.getElementById('answer-list-modal').style.display = 'none';
+            document.getElementById('show-answer-list').style.display = 'none';
+
+            const currentQuestionNum = parseInt(qNum.textContent);
+
+            if (currentQuestionNum === 3) {
+                conn.invoke("GetGameResults");
+            } else {
+                conn.invoke("NextQuestion");
+            }
+        };
+
+        // 回答一覧を表示
+        function displayAnswerList(answerList) {
+            const modal = document.getElementById('answer-list-modal');
+            const questionDiv = document.getElementById('answer-list-question');
+            const contentDiv = document.getElementById('answer-list-content');
+
+            // 問題文を表示
+            questionDiv.textContent = answerList.QuestionTitle || answerList.questionTitle;
+
+            // 回答内容を表示
+            let html = `<div style="margin-bottom:12px;color:#666;">総回答数: ${answerList.TotalResponses || answerList.totalResponses}件</div>`;
+
+            const answerGroups = answerList.AnswerGroups || answerList.answerGroups || [];
+            answerGroups.forEach(group => {
+                const option = group.Option || group.option;
+                const count = group.Count || group.count;
+                const teams = group.Teams || group.teams || [];
+
+                html += `
+                    <div style="margin-bottom:20px;padding:16px;background:#f9fafb;border-radius:8px;">
+                        <div style="font-size:18px;font-weight:700;color:#111;margin-bottom:12px;">
+                            選択肢 ${option} <span style="font-weight:400;color:#666;">(${count}件)</span>
+                        </div>
+                        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                `;
+
+                teams.forEach(team => {
+                    const teamName = team.TeamName || team.teamName;
+                    const multiplier = team.Multiplier || team.multiplier;
+                    html += `
+                        <div style="padding:8px 12px;background:white;border:1px solid #e5e7eb;border-radius:6px;">
+                            <span style="font-weight:600;">${teamName}</span>
+                            <span style="color:#666;margin-left:8px;">×${multiplier}</span>
+                        </div>
+                    `;
+                });
+
+                html += `
+                        </div>
+                    </div>
+                `;
+            });
+
+            contentDiv.innerHTML = html;
+            modal.style.display = 'block';
+        }
+
         // 回答削除関数
         function deleteVote(clientId) {
             if (confirm('このチームの回答を削除しますか？')) {

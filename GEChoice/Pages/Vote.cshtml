@@ -775,6 +775,72 @@
           updateVoteButtons();
         });
 
+        // 回答一覧表示の処理
+        conn.on('AnswerListReceived', answerList => {
+          // 回答一覧モーダルを表示
+          const modal = document.createElement('div');
+          modal.className = 'confirm-modal';
+          modal.style.display = 'flex';
+          modal.style.zIndex = '2000';
+
+          const questionTitle = answerList.QuestionTitle || answerList.questionTitle;
+          const totalResponses = answerList.TotalResponses || answerList.totalResponses;
+          const answerGroups = answerList.AnswerGroups || answerList.answerGroups || [];
+
+          let html = `<div style="color:#666;margin-bottom:12px;">総回答数: ${totalResponses}件</div>`;
+
+          answerGroups.forEach(group => {
+            const option = group.Option || group.option;
+            const count = group.Count || group.count;
+            const teams = group.Teams || group.teams || [];
+
+            html += `
+              <div style="margin-bottom:20px;padding:16px;background:#f9fafb;border-radius:8px;">
+                <div style="font-size:18px;font-weight:700;color:#111;margin-bottom:12px;">
+                  選択肢 ${option} <span style="font-weight:400;color:#666;">(${count}件)</span>
+                </div>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;">
+            `;
+
+            teams.forEach(team => {
+              const teamName = team.TeamName || team.teamName;
+              const multiplier = team.Multiplier || team.multiplier;
+              const clientId = team.ClientId || team.clientId;
+              const isMyAnswer = clientId === conn.connectionId;
+
+              html += `
+                <div style="padding:8px 12px;background:${isMyAnswer ? '#fef3c7' : 'white'};border:1px solid ${isMyAnswer ? '#f59e0b' : '#e5e7eb'};border-radius:6px;">
+                  <span style="font-weight:600;">${teamName}</span>
+                  <span style="color:#666;margin-left:8px;">×${multiplier}</span>
+                  ${isMyAnswer ? '<span style="color:#f59e0b;margin-left:8px;">(あなた)</span>' : ''}
+                </div>
+              `;
+            });
+
+            html += `
+                </div>
+              </div>
+            `;
+          });
+
+          modal.innerHTML = `
+            <div class="confirm-box" style="max-width:800px;max-height:80vh;overflow-y:auto;">
+              <div class="confirm-title">回答一覧</div>
+              <div style="color:#666;margin-bottom:20px;font-size:18px;font-weight:600;">${questionTitle}</div>
+              <div style="margin:20px 0;">${html}</div>
+              <div class="confirm-buttons">
+                <button class="confirm-btn confirm-ok" style="width:100%;">閉じる</button>
+              </div>
+            </div>
+          `;
+
+          document.body.appendChild(modal);
+
+          modal.querySelector('.confirm-ok').onclick = () => {
+            document.body.removeChild(modal);
+          };
+        });
+
         // 最終結果表示の処理を追加
         conn.on('GameResults', results => {
           // 最終結果モーダルを表示
@@ -782,7 +848,7 @@
           modal.className = 'confirm-modal';
           modal.style.display = 'flex';
           modal.style.zIndex = '2000';
-          
+
           let html = '<table style="width:100%;"><tr><th>順位</th><th>チーム名</th><th>合計点数</th><th>合計時間</th></tr>';
           results.forEach((r, i) => {
             const teamName = r.teamName || r.TeamName || (r.clientId || r.ClientId || '').substring(0, 8);
@@ -794,19 +860,19 @@
             </tr>`;
           });
           html += '</table>';
-          
+
           modal.innerHTML = `
             <div class="confirm-box" style="max-width:600px;">
-              <div class="confirm-title">🏆 最終結果</div>
+              <div class="confirm-title">最終結果</div>
               <div style="margin:20px 0;overflow-x:auto;">${html}</div>
               <div class="confirm-buttons">
                 <button class="confirm-btn confirm-ok" style="width:100%;">閉じる</button>
               </div>
             </div>
           `;
-          
+
           document.body.appendChild(modal);
-          
+
           modal.querySelector('.confirm-ok').onclick = () => {
             document.body.removeChild(modal);
           };
