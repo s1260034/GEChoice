@@ -1,272 +1,191 @@
-using Microsoft.AspNetCore.SignalR;
+// ファイル: Hubs/VoteHub.cs
 using System.Collections.Concurrent;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Configuration;
 
 namespace GEChoice.Hubs
 {
-    // --- DTO ---
-    public class VoteOption
-    {
-        public string Label { get; set; } = "";   // "A","B","C"
-    }
-    
-    public class VoteQuestion
-    {
-        public string Title { get; set; } = "";
-        public List<VoteOption> Options { get; set; } = new();
-    }
-    
-    public class VoteState
-    {
-        public int CurrentIndex { get; set; }
-        public VoteQuestion Question { get; set; } = new();
-        public Dictionary<string, int> Counts { get; set; } = new();
-        public bool IsVotingOpen { get; set; }
-        public DateTime? VotingStartTime { get; set; }
-        public Dictionary<string, ClientVoteData> ClientVotes { get; set; } = new();
-        public List<string> ActiveClients { get; set; } = new();
-    }
-
-    public class ClientVoteData
-    {
-        public string ClientId { get; set; } = "";
-        public string TeamName { get; set; } = "";
-        public string SelectedOption { get; set; } = "";
-        public int Multiplier { get; set; }
-        public double ResponseTime { get; set; }
-        public int Points { get; set; }
-    }
-
-    public class GameResult
-    {
-        public string ClientId { get; set; } = "";
-        public string TeamName { get; set; } = "";
-        public int TotalPoints { get; set; }
-        public double TotalTime { get; set; }
-        public Dictionary<int, ClientVoteData> QuestionResults { get; set; } = new();
-    }
-
     public class VoteHub : Hub
     {
-        private static readonly ConcurrentDictionary<string, string> _answers = new();
-        private static readonly ConcurrentDictionary<string, string> _teamNames = new();
-        private static readonly ConcurrentDictionary<string, List<int>> _usedMultipliers = new();
-        private static readonly ConcurrentDictionary<int, ConcurrentDictionary<string, ClientVoteData>> _questionResults = new();
-        private static readonly ConcurrentDictionary<string, DateTime> _voteStartTimes = new();
+        // ====== 設問・状態 ======
+        private static readonly object _lock = new();
         private static int _currentIndex = 0;
-        private static bool _isVotingOpen = false;
-        private static DateTime? _votingStartTime = null;
-        private readonly IConfiguration _config;
-        
-        // 正解リスト（問題1:A, 問題2:B, 問題3:A）
-        private static readonly string[] _correctAnswers = { "A", "B", "A" };
-        
-        public VoteHub(IConfiguration config) => _config = config;
 
-        private List<VoteQuestion> LoadQuestions()
+        // 設問は appsettings.json から読み込み（Title と Options(A/B)）
+        private static List<Question> _questions = new()
         {
-            var list = new List<VoteQuestion>();
-            foreach (var q in _config.GetSection("Voting:Questions").GetChildren())
+            new Question { Title = "第1問", Options = new[] { "A", "B" } },
+            new Question { Title = "第2問", Options = new[] { "A", "B" } },
+            new Question { Title = "第3問", Options = new[] { "A", "B" } }
+        };
+
+        // 投票受付フラグ・開始時刻
+        private static volatile bool _isVotingOpen = false;
+        private static DateTime? _votingStartTimeUtc = null;
+
+        // 集計
+        private static readonly ConcurrentDictionary<string, string> _answers = new(); // connId -> "A"/"B"
+        private static readonly ConcurrentDictionary<string, ClientVote> _clientVotes = new(); // connId -> 詳細
+        private static readonly ConcurrentDictionary<string, HashSet<int>> _usedMultipliers = new(); // connId -> {1,2,4}
+
+        // 問題ごとの結果履歴（StopVoting時にスナップショット）
+        private static readonly ConcurrentDictionary<int, List<QuestionResult>> _questionResults = new();
+
+        private readonly IConfiguration _cfg;
+
+        public VoteHub(IConfiguration cfg)
+        {
+            _cfg = cfg;
+
+            // 初回だけ設定から設問ロード
+            if (_questions.Count == 3 && _questions[0].Title == "第1問")
             {
-                var item = new VoteQuestion { Title = q["Title"] ?? "問題" };
-
-                var opts = new List<VoteOption>();
-                foreach (var o in q.GetSection("Options").GetChildren())
+                var qs = _cfg.GetSection("Voting:Questions").Get<List<AppSettingsQuestion>>();
+                if (qs != null && qs.Count > 0)
                 {
-                    var s = o.Get<string?>();
-                    if (!string.IsNullOrWhiteSpace(s))
+                    _questions = qs.Select(q => new Question
                     {
-                        opts.Add(new VoteOption { Label = s!.Trim() });
-                        continue;
+                        Title = q.Title ?? "",
+                        Options = (q.Options ?? Array.Empty<string>())
+                                 .Where(o => o is "A" or "B" or "C").ToArray()
+                    }).ToList();
+
+                    if (_questions.Count == 0)
+                    {
+                        _questions = new()
+                        {
+                            new Question { Title = "Q1", Options = new[] { "A","B" } },
+                            new Question { Title = "Q2", Options = new[] { "A","B" } },
+                            new Question { Title = "Q3", Options = new[] { "A","B" } }
+                        };
                     }
-                    var label = o["Label"];
-                    if (!string.IsNullOrWhiteSpace(label))
-                        opts.Add(new VoteOption { Label = label.Trim() });
                 }
-
-                item.Options = opts
-                    .Where(x => x.Label is "A" or "B" or "C")
-                    .DistinctBy(x => x.Label)
-                    .ToList();
-
-                if (item.Options.Count < 2)
-                    item.Options = new() { new() { Label = "A" }, new() { Label = "B" } };
-
-                list.Add(item);
             }
-
-            if (list.Count == 0)
-                list.Add(new VoteQuestion { Title = "サンプル", Options = new() { new() { Label = "A" }, new() { Label = "B" } } });
-
-            return list;
         }
 
-        private VoteQuestion CurrentQuestion(List<VoteQuestion> qs)
-            => qs[Math.Clamp(_currentIndex, 0, qs.Count - 1)];
-
+        // ====== Hub エンドポイント ======
         public override async Task OnConnectedAsync()
         {
-            await base.OnConnectedAsync();
             await Clients.Caller.SendAsync("StateUpdated", BuildState());
+            await base.OnConnectedAsync();
         }
 
         public override async Task OnDisconnectedAsync(Exception? exception)
         {
+            // 切断時は現在の回答を掃除
             _answers.TryRemove(Context.ConnectionId, out _);
-            _teamNames.TryRemove(Context.ConnectionId, out _);
-            _voteStartTimes.TryRemove(Context.ConnectionId, out _);
+            _clientVotes.TryRemove(Context.ConnectionId, out _);
+            _usedMultipliers.TryRemove(Context.ConnectionId, out _);
+
             await Clients.All.SendAsync("StateUpdated", BuildState());
             await base.OnDisconnectedAsync(exception);
         }
 
-        public Task<VoteState> GetState() => Task.FromResult(BuildState());
+        // 現在状態を取得（ページ初期表示で呼ばれる）
+        public Task GetState() => Clients.Caller.SendAsync("StateUpdated", BuildState());
 
-        // 回答開始ボタン
-        public async Task StartVoting()
-        {
-            _isVotingOpen = true;
-            _votingStartTime = DateTime.Now;
-            _answers.Clear();
-            _voteStartTimes.Clear();
-            await Clients.All.SendAsync("VotingStatusChanged", true);
-            await Clients.All.SendAsync("StateUpdated", BuildState());
-        }
-
-        // 回答終了ボタン
-        public async Task StopVoting()
-        {
-            _isVotingOpen = false;
-            
-            // 現在の問題の結果を保存
-            if (!_questionResults.ContainsKey(_currentIndex))
-                _questionResults[_currentIndex] = new ConcurrentDictionary<string, ClientVoteData>();
-            
-            // 正解を取得
-            string correctAnswer = _currentIndex < _correctAnswers.Length ? _correctAnswers[_currentIndex] : "";
-            
-            // 各クライアントの投票データを集計
-            foreach (var kvp in _answers)
-            {
-                var clientId = kvp.Key;
-                var selectedOption = kvp.Value;
-                
-                // 回答時間を計算
-                double responseTime = 0;
-                if (_voteStartTimes.TryGetValue(clientId, out var startTime) && _votingStartTime.HasValue)
-                {
-                    responseTime = (startTime - _votingStartTime.Value).TotalSeconds;
-                }
-                
-                // 倍率を取得（デフォルト1）
-                var parts = selectedOption.Split('|');
-                var option = parts[0];
-                var multiplier = parts.Length > 1 && int.TryParse(parts[1], out var m) ? m : 1;
-                
-                // 正解判定して点数を計算
-                bool isCorrect = option == correctAnswer;
-                int points = isCorrect ? multiplier : 0;
-                
-                var voteData = new ClientVoteData
-                {
-                    ClientId = clientId,
-                    TeamName = _teamNames.TryGetValue(clientId, out var team) ? team : clientId.Substring(0, Math.Min(8, clientId.Length)),
-                    SelectedOption = option,
-                    Multiplier = multiplier,
-                    ResponseTime = responseTime,
-                    Points = points
-                };
-                
-                _questionResults[_currentIndex][clientId] = voteData;
-            }
-            
-            await Clients.All.SendAsync("VotingStatusChanged", false);
-            await Clients.All.SendAsync("QuestionResults", _currentIndex, _questionResults[_currentIndex].Values.ToList());
-            await Clients.All.SendAsync("StateUpdated", BuildState());
-        }
-
-        // チーム名を設定
-        public async Task SetTeamName(string teamName)
-        {
-            if (!string.IsNullOrWhiteSpace(teamName))
-            {
-                _teamNames[Context.ConnectionId] = teamName;
-                await Clients.All.SendAsync("StateUpdated", BuildState());
-            }
-        }
-
-        // クライアントからの投票（倍率付き）
-        public async Task SubmitWithMultiplier(string label, int multiplier, string teamName = null!)
+        // A/B のみ（倍率なし）で投票するシンプル版
+        public async Task Submit(string label)
         {
             if (!_isVotingOpen) return;
-            
-            var qs = LoadQuestions();
-            var valid = CurrentQuestion(qs).Options.Select(o => o.Label).ToHashSet(StringComparer.Ordinal);
-            if (!valid.Contains(label)) return;
-            
-            // 倍率の検証（1, 2, 4のみ、既に使用済みでないか）
-            if (!new[] { 1, 2, 4 }.Contains(multiplier)) return;
-            
-            var clientId = Context.ConnectionId;
-            if (!_usedMultipliers.ContainsKey(clientId))
-                _usedMultipliers[clientId] = new List<int>();
-            
-            if (_usedMultipliers[clientId].Contains(multiplier)) return;
-            
-            // チーム名を更新
-            if (!string.IsNullOrWhiteSpace(teamName))
+            if (!IsValidOption(label)) return;
+
+            var now = DateTime.UtcNow;
+            _answers[Context.ConnectionId] = label;
+
+            // チーム名など未指定でも最低限の形で記録
+            var cv = _clientVotes.GetOrAdd(Context.ConnectionId, _ => new ClientVote
             {
-                _teamNames[clientId] = teamName;
-            }
-            
-            // 投票を記録
-            _answers[clientId] = $"{label}|{multiplier}";
-            _usedMultipliers[clientId].Add(multiplier);
-            
-            // 投票開始時刻を記録
-            if (!_voteStartTimes.ContainsKey(clientId))
-                _voteStartTimes[clientId] = DateTime.Now;
-            
+                ClientId = Context.ConnectionId,
+                TeamName = "",
+                Multiplier = 1
+            });
+            cv.SelectedOption = label;
+            cv.ResponseTime = CalcResponseSec(now);
+
             await Clients.All.SendAsync("StateUpdated", BuildState());
+        }
+
+        // 倍率・チーム名つきの投票（あなたのVote.cshtmlがこれを呼ぶ）
+        public async Task SubmitWithMultiplier(string label, int multiplier, string? teamName)
+        {
+            if (!_isVotingOpen) return;
+            if (!IsValidOption(label)) return;
+            if (multiplier is not (1 or 2 or 4)) return;
+
+            // 同一クライアントで各倍率は一度だけ
+            var used = _usedMultipliers.GetOrAdd(Context.ConnectionId, _ => new HashSet<int>());
+            lock (_lock)
+            {
+                if (used.Contains(multiplier)) return;
+                used.Add(multiplier);
+            }
+
+            var now = DateTime.UtcNow;
+
+            _answers[Context.ConnectionId] = label;
+            _clientVotes[Context.ConnectionId] = new ClientVote
+            {
+                ClientId = Context.ConnectionId,
+                TeamName = teamName ?? "",
+                SelectedOption = label,
+                Multiplier = multiplier,
+                ResponseTime = CalcResponseSec(now)
+            };
+
+            await Clients.All.SendAsync("StateUpdated", BuildState());
+            // クライアント側で倍率ボタンを無効化するため
             await Clients.Caller.SendAsync("MultiplierUsed", multiplier);
         }
 
-        public async Task Submit(string label)
+        // 回答開始
+        public async Task StartVoting()
         {
-            await SubmitWithMultiplier(label, 1);
+            _isVotingOpen = true;
+            _votingStartTimeUtc = DateTime.UtcNow;
+            await Clients.All.SendAsync("VotingStatusChanged", true);
         }
 
-        // 特定のクライアントの回答を削除
-        public async Task DeleteClientVote(string clientId)
+        // 回答終了（この時点で結果を確定・保存しておく）
+        public async Task StopVoting()
         {
-            // 削除される回答の倍率を取得
-            int deletedMultiplier = 1;
-            if (_answers.TryGetValue(clientId, out var answer))
-            {
-                var parts = answer.Split('|');
-                if (parts.Length > 1 && int.TryParse(parts[1], out var m))
+            _isVotingOpen = false;
+
+            var snapshot = _clientVotes.Values
+                .Select(v => new QuestionResult
                 {
-                    deletedMultiplier = m;
-                }
-            }
-            
-            _answers.TryRemove(clientId, out _);
-            _voteStartTimes.TryRemove(clientId, out _);
-            
-            // 削除された倍率を使用済みリストから削除
-            if (_usedMultipliers.TryGetValue(clientId, out var multipliers))
-            {
-                multipliers.Remove(deletedMultiplier);
-            }
-            
-            // 現在の問題の結果からも削除
-            if (_questionResults.TryGetValue(_currentIndex, out var results))
-            {
-                results.TryRemove(clientId, out _);
-            }
-            
-            await Clients.All.SendAsync("StateUpdated", BuildState());
-            await Clients.All.SendAsync("VoteDeleted", clientId, deletedMultiplier);
+                    ClientId = v.ClientId,
+                    TeamName = v.TeamName,
+                    SelectedOption = v.SelectedOption,
+                    Multiplier = v.Multiplier,
+                    ResponseTime = v.ResponseTime,
+                    Points = v.Multiplier // 得点の定義が未定のため、とりあえず倍率を得点として記録
+                })
+                .ToList();
+
+            _questionResults[_currentIndex] = snapshot;
+
+            await Clients.All.SendAsync("VotingStatusChanged", false);
+            await Clients.All.SendAsync("QuestionResults", _currentIndex, snapshot);
         }
 
+        // 次の問題へ
+        public async Task NextQuestion()
+        {
+            _currentIndex = Math.Min(_currentIndex + 1, _questions.Count - 1);
+            ClearPerQuestionBuffers();
+            await Clients.All.SendAsync("StateUpdated", BuildState());
+        }
+
+        // 前の問題へ
+        public async Task PrevQuestion()
+        {
+            _currentIndex = Math.Max(_currentIndex - 1, 0);
+            ClearPerQuestionBuffers();
+            await Clients.All.SendAsync("StateUpdated", BuildState());
+        }
+
+        // すべてリセット（ゲームリセット）
         // 回答一覧を取得（正解は含まない）
         public async Task ShowAnswerList()
         {
@@ -318,123 +237,167 @@ namespace GEChoice.Hubs
         public async Task ResetCounts()
         {
             _answers.Clear();
-            _teamNames.Clear();
+            _clientVotes.Clear();
             _usedMultipliers.Clear();
             _questionResults.Clear();
-            _voteStartTimes.Clear();
+
+            _currentIndex = 0;
             _isVotingOpen = false;
-            _votingStartTime = null;
+            _votingStartTimeUtc = null;
+
             await Clients.All.SendAsync("StateUpdated", BuildState());
-            await Clients.All.SendAsync("GameReset"); // クライアントにリセット通知を送信
+            await Clients.All.SendAsync("GameReset");
         }
 
-        public async Task SetQuestion(int index)
-        {
-            // 回答受付中の場合は移動を禁止
-            if (_isVotingOpen)
-            {
-                await Clients.Caller.SendAsync("ShowAlert", "回答終了ボタンを押してから次の問題に進んでください。");
-                return;
-            }
-            
-            var qs = LoadQuestions();
-            _currentIndex = Math.Clamp(index, 0, qs.Count - 1);
-            _answers.Clear();
-            _voteStartTimes.Clear();
-            _isVotingOpen = false;
-            _votingStartTime = null;
-            await Clients.All.SendAsync("StateUpdated", BuildState());
-        }
-
-        public Task PrevQuestion() => SetQuestion(_currentIndex - 1);
-        public Task NextQuestion() => SetQuestion(_currentIndex + 1);
-
-        // 最終結果を取得
+        // 最終結果（ホストの「最終結果」ボタンから呼ばれる）
         public async Task GetGameResults()
         {
-            var results = new List<GameResult>();
-            var allClients = new HashSet<string>();
-            
-            foreach (var qr in _questionResults)
+            // 問題ごとの結果を合算してランキングを作成
+            var total = new Dictionary<string, (string Team, int Points, double Time)>();
+
+            foreach (var kv in _questionResults)
             {
-                foreach (var clientId in qr.Value.Keys)
-                    allClients.Add(clientId);
-            }
-            
-            foreach (var clientId in allClients)
-            {
-                var result = new GameResult 
-                { 
-                    ClientId = clientId,
-                    TeamName = _teamNames.TryGetValue(clientId, out var team) ? team : clientId.Substring(0, Math.Min(8, clientId.Length))
-                };
-                
-                foreach (var kvp in _questionResults)
+                foreach (var r in kv.Value)
                 {
-                    if (kvp.Value.TryGetValue(clientId, out var voteData))
-                    {
-                        result.QuestionResults[kvp.Key] = voteData;
-                        result.TotalPoints += voteData.Points;
-                        result.TotalTime += voteData.ResponseTime;
-                    }
+                    var key = r.TeamName?.Trim().Length > 0 ? r.TeamName! : r.ClientId!;
+                    if (!total.TryGetValue(key, out var acc))
+                        acc = (key, 0, 0);
+
+                    acc.Points += r.Points;
+                    acc.Time += r.ResponseTime;
+                    total[key] = acc;
                 }
-                
-                results.Add(result);
             }
-            
-            // 点数の高い順、同点の場合は時間の早い順でソート
-            results = results.OrderByDescending(r => r.TotalPoints)
-                           .ThenBy(r => r.TotalTime)
-                           .ToList();
-            
+
+            var results = total
+                .Select(x => new GameResult
+                {
+                    ClientId = x.Key, // チーム名があれば同じ値
+                    TeamName = x.Value.Team,
+                    TotalPoints = x.Value.Points,
+                    TotalTime = x.Value.Time
+                })
+                .OrderByDescending(r => r.TotalPoints)
+                .ThenBy(r => r.TotalTime)
+                .ToList();
+
+            // ホスト側はモーダルで表示、クライアント側は特に受け取っても害はない
             await Clients.All.SendAsync("GameResults", results);
         }
 
-        private VoteState BuildState()
+        // ホストの「削除」操作
+        public async Task DeleteClientVote(string clientId)
         {
-            var qs = LoadQuestions();
-            var q = CurrentQuestion(qs);
-
-            var valid = q.Options.Select(o => o.Label).ToHashSet(StringComparer.Ordinal);
-            var counts = _answers.Values
-                .Select(v => v.Split('|')[0])
-                .Where(v => valid.Contains(v))
-                .GroupBy(v => v)
-                .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
-
-            foreach (var o in q.Options)
-                if (!counts.ContainsKey(o.Label)) counts[o.Label] = 0;
-
-            var clientVotes = new Dictionary<string, ClientVoteData>();
-            foreach (var kvp in _answers)
+            if (_clientVotes.TryRemove(clientId, out var removed))
             {
-                var parts = kvp.Value.Split('|');
-                double responseTime = 0;
-                if (_voteStartTimes.TryGetValue(kvp.Key, out var startTime) && _votingStartTime.HasValue)
+                _answers.TryRemove(clientId, out _);
+
+                // 使用済み倍率を元に戻せるよう、記録から外す
+                if (_usedMultipliers.TryGetValue(clientId, out var set) && removed?.Multiplier is 1 or 2 or 4)
                 {
-                    responseTime = (startTime - _votingStartTime.Value).TotalSeconds;
+                    lock (_lock) set.Remove(removed.Multiplier);
                 }
-                
-                clientVotes[kvp.Key] = new ClientVoteData
-                {
-                    ClientId = kvp.Key,
-                    TeamName = _teamNames.TryGetValue(kvp.Key, out var team) ? team : kvp.Key.Substring(0, Math.Min(8, kvp.Key.Length)),
-                    SelectedOption = parts[0],
-                    Multiplier = parts.Length > 1 && int.TryParse(parts[1], out var m) ? m : 1,
-                    ResponseTime = responseTime
-                };
+
+                await Clients.All.SendAsync("VoteDeleted", clientId, removed?.Multiplier ?? 0);
+                await Clients.All.SendAsync("StateUpdated", BuildState());
+            }
+        }
+
+        // ====== 内部ヘルパ ======
+        private bool IsValidOption(string label)
+        {
+            var q = _questions[_currentIndex];
+            return q.Options.Contains(label, StringComparer.OrdinalIgnoreCase);
+        }
+
+        private static double CalcResponseSec(DateTime nowUtc)
+        {
+            if (_votingStartTimeUtc == null) return 0;
+            return Math.Max(0, (nowUtc - _votingStartTimeUtc.Value).TotalSeconds);
+        }
+
+        private static void ClearPerQuestionBuffers()
+        {
+            _answers.Clear();
+            _clientVotes.Clear();
+            _usedMultipliers.Clear();
+            _isVotingOpen = false;
+            _votingStartTimeUtc = null;
+        }
+
+        private object BuildState()
+        {
+            var q = _questions[_currentIndex];
+
+            // 票数を数える（A/B/C すべてに対応、Cが無い設問なら0のまま）
+            var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var o in q.Options) counts[o] = 0;
+            foreach (var v in _answers.Values)
+            {
+                if (counts.ContainsKey(v)) counts[v]++;
             }
 
-            return new VoteState 
-            { 
-                CurrentIndex = _currentIndex, 
-                Question = q, 
-                Counts = counts,
-                IsVotingOpen = _isVotingOpen,
-                VotingStartTime = _votingStartTime,
-                ClientVotes = clientVotes,
-                ActiveClients = _answers.Keys.ToList()
+            // 参加者の回答状況（ホスト用テーブル）
+            var clientVotes = _clientVotes.ToDictionary(
+                kv => kv.Key,
+                kv => new
+                {
+                    clientId = kv.Value.ClientId,
+                    teamName = kv.Value.TeamName,
+                    selectedOption = kv.Value.SelectedOption,
+                    multiplier = kv.Value.Multiplier,
+                    responseTime = kv.Value.ResponseTime
+                });
+
+            return new
+            {
+                currentIndex = _currentIndex,
+                question = new { title = q.Title, options = q.Options.Select(o => new { label = o }) },
+                counts,
+                isVotingOpen = _isVotingOpen,
+                votingStartTime = _votingStartTimeUtc,
+                clientVotes
             };
+        }
+
+        // ====== モデル ======
+        private class Question
+        {
+            public string Title { get; set; } = "";
+            public string[] Options { get; set; } = Array.Empty<string>();
+        }
+
+        private class AppSettingsQuestion
+        {
+            public string? Title { get; set; }
+            public string[]? Options { get; set; }
+        }
+
+        private class ClientVote
+        {
+            public string ClientId { get; set; } = "";
+            public string TeamName { get; set; } = "";
+            public string SelectedOption { get; set; } = "-";
+            public int Multiplier { get; set; } = 1;
+            public double ResponseTime { get; set; } = 0; // 秒
+        }
+
+        private class QuestionResult
+        {
+            public string ClientId { get; set; } = "";
+            public string TeamName { get; set; } = "";
+            public string SelectedOption { get; set; } = "-";
+            public int Multiplier { get; set; } = 1;
+            public double ResponseTime { get; set; } = 0;
+            public int Points { get; set; } = 0;
+        }
+
+        private class GameResult
+        {
+            public string ClientId { get; set; } = "";
+            public string TeamName { get; set; } = "";
+            public int TotalPoints { get; set; }
+            public double TotalTime { get; set; }
         }
     }
 }
