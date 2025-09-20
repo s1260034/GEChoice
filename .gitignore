@@ -482,3 +482,22 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+
+# Build results
+[Bb]in/
+[Oo]bj/
+
+# Visual Studio cache files
+*.vs/
+*.user
+*.suo
+*.cache
+*.db
+*.db-shm
+*.db-wal
+
+# NuGet
+*.nuget.props
+*.nuget.targets
+project.nuget.cache
