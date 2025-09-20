@@ -186,6 +186,54 @@ namespace GEChoice.Hubs
         }
 
         // すべてリセット（ゲームリセット）
+        // 回答一覧を取得（正解は含まない）
+        public async Task ShowAnswerList()
+        {
+            var qs = LoadQuestions();
+            var currentQuestion = CurrentQuestion(qs);
+
+            // 選択肢ごとにグループ化
+            var answerGroups = new Dictionary<string, List<object>>();
+            foreach (var option in currentQuestion.Options)
+            {
+                answerGroups[option.Label] = new List<object>();
+            }
+
+            // 各回答をグループに振り分け
+            foreach (var kvp in _answers)
+            {
+                var parts = kvp.Value.Split('|');
+                var selectedOption = parts[0];
+                var multiplier = parts.Length > 1 && int.TryParse(parts[1], out var m) ? m : 1;
+                var teamName = _teamNames.TryGetValue(kvp.Key, out var team) ? team : kvp.Key.Substring(0, Math.Min(8, kvp.Key.Length));
+
+                if (answerGroups.ContainsKey(selectedOption))
+                {
+                    answerGroups[selectedOption].Add(new
+                    {
+                        ClientId = kvp.Key,
+                        TeamName = teamName,
+                        Multiplier = multiplier
+                    });
+                }
+            }
+
+            var answerList = new
+            {
+                QuestionIndex = _currentIndex,
+                QuestionTitle = currentQuestion.Title,
+                TotalResponses = _answers.Count,
+                AnswerGroups = answerGroups.Select(g => new
+                {
+                    Option = g.Key,
+                    Count = g.Value.Count,
+                    Teams = g.Value.OrderBy(t => ((dynamic)t).TeamName)
+                })
+            };
+
+            await Clients.All.SendAsync("AnswerListReceived", answerList);
+        }
+
         public async Task ResetCounts()
         {
             _answers.Clear();
