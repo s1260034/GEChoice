@@ -14,14 +14,15 @@ var app = builder.Build();
 app.MapGet("/host-login", async ctx =>
 {
     var html = """
-            <!doctype html><html><body style="font-family:system-ui;">
-            <h2>Host Login</h2>
-            <form method="post" action="/host-login">
-              <input type="password" name="key" placeholder="Host Key" style="padding:8px;">
-              <button type="submit" style="padding:8px 12px;">OK</button>
-            </form>
-            </body></html>
-        """;
+        <!doctype html><html><body style="font-family:system-ui;">
+        <h2>Host Login</h2>
+        <form method="post" action="/host-login">
+          <input type="password" name="key" placeholder="Host Key" style="padding:8px;">
+          <button type="submit" style="padding:8px 12px;">OK</button>
+        </form>
+        </body></html>
+    """;
+
     ctx.Response.ContentType = "text/html; charset=utf-8";
     await ctx.Response.WriteAsync(html);
 });
@@ -47,7 +48,7 @@ app.MapPost("/host-login", async ctx =>
     }
 });
 
-// ‚±‚±‚ªƒ|ƒCƒ“ƒgFƒzƒXƒg‰æ–Ê( / )‚Ì’¼‘O‚ÅƒNƒbƒL[ƒ`ƒFƒbƒN
+// ã“ã“ãŒãƒã‚¤ãƒ³ãƒˆï¼šãƒ›ã‚¹ãƒˆç”»é¢( / )ã®ç›´å‰ã§ã‚¯ãƒƒã‚­ãƒ¼ãƒã‚§ãƒƒã‚¯
 app.Use(async (ctx, next) =>
 {
     if (ctx.Request.Path == "/" && ctx.Request.Cookies["gec_host"] != "ok")
