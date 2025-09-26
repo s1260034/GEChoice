@@ -9,6 +9,408 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>@ViewData["Title"]</title>
     <script src="~/lib/signalr/signalr.min.js"></script>
+    <style>
+        :root {
+            --bd: #e5e7eb;
+            --txt: #222;
+            --muted: #666;
+            --g1: #22c55e;
+            --g2: #16a34a;
+            --red: #ef4444
+        }
+
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent
+        }
+
+        html, body {
+            height: 100%
+        }
+
+        body {
+            margin: 0;
+            background: #fff;
+            color: var(--txt);
+            font-family: Inter,system-ui,sans-serif
+        }
+
+        header {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--bd);
+            background: #fff
+        }
+
+            header .title {
+                font-weight: 800;
+                margin-left: 4px
+            }
+
+        main {
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px
+        }
+
+        .card {
+            background: #fff;
+            border: 1px solid var(--bd);
+            border-radius: 14px;
+            box-shadow: 0 6px 18px rgba(0,0,0,.06);
+            padding: 16px
+        }
+
+        .multiplier-section {
+            margin-bottom: 16px
+        }
+
+        .multiplier-title {
+            font-size: 14px;
+            color: var(--muted);
+            margin-bottom: 8px
+        }
+
+        .multipliers {
+            display: grid;
+            grid-template-columns: repeat(3,1fr);
+            gap: 8px
+        }
+
+        .multiplier-btn {
+            appearance: none;
+            border: 2px solid var(--bd);
+            border-radius: 10px;
+            padding: 12px;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            background: #fff;
+            transition: all .15s;
+            position: relative
+        }
+
+            .multiplier-btn:hover:not(:disabled) {
+                transform: translateY(-2px);
+                box-shadow: 0 4px 12px rgba(0,0,0,.1)
+            }
+
+            .multiplier-btn.selected {
+                border-color: var(--g1);
+                background: linear-gradient(135deg,var(--g1),var(--g2));
+                color: #fff
+            }
+
+            .multiplier-btn:disabled {
+                opacity: .4;
+                cursor: not-allowed;
+                background: #f3f4f6
+            }
+
+            .multiplier-btn.used {
+                background: #f3f4f6;
+                border-color: #d1d5db;
+                color: #9ca3af
+            }
+
+        .choices {
+            display: grid;
+            gap: 12px;
+            grid-template-columns: repeat(auto-fit,minmax(140px,1fr))
+        }
+
+        .choice {
+            appearance: none;
+            border: none;
+            border-radius: 14px;
+            padding: 16px;
+            font-size: 18px;
+            font-weight: 700;
+            cursor: pointer;
+            background: linear-gradient(90deg,var(--g1),var(--g2));
+            color: #fff;
+            box-shadow: 0 6px 16px rgba(34,197,94,.3);
+            transition: transform .08s
+        }
+
+            .choice:active {
+                transform: scale(.96)
+            }
+
+            .choice:disabled {
+                opacity: .5;
+                cursor: not-allowed
+            }
+
+        .selected-answer {
+            background: linear-gradient(90deg,#fbbf24,#f59e0b) !important;
+            position: relative
+        }
+
+            .selected-answer::after {
+                content: '✓ 選択済み';
+                position: absolute;
+                top: -10px;
+                right: 10px;
+                background: #f59e0b;
+                color: #fff;
+                padding: 2px 8px;
+                border-radius: 12px;
+                font-size: 12px;
+                font-weight: 700
+            }
+
+        #msg {
+            color: #555;
+            font-size: 13px;
+            min-height: 20px;
+            padding: 8px;
+            background: #f9fafb;
+            border-radius: 8px;
+            text-align: center
+        }
+
+        .status {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            padding: 10px;
+            border: 1px solid var(--bd);
+            border-radius: 10px;
+            font-size: 13px;
+            color: #666
+        }
+
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ccc
+        }
+
+        .ok {
+            background: #22c55e
+        }
+
+        .ng {
+            background: #ef4444
+        }
+
+        .voting-closed {
+            text-align: center;
+            padding: 32px;
+            color: var(--muted);
+            font-size: 16px
+        }
+
+        .voting-closed-icon {
+            font-size: 48px;
+            margin-bottom: 16px
+        }
+
+        .modal-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,.35);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 16px
+        }
+
+        .modal {
+            width: 100%;
+            max-width: 420px;
+            background: #fff;
+            border: 1px solid var(--bd);
+            border-radius: 14px;
+            box-shadow: 0 20px 50px rgba(0,0,0,.18);
+            padding: 18px
+        }
+
+            .modal h3 {
+                margin: 0 0 8px
+            }
+
+            .modal p {
+                margin: 0 0 14px;
+                color: var(--muted);
+                font-size: 14px
+            }
+
+        .input {
+            width: 100%;
+            padding: 12px 14px;
+            border: 1px solid var(--bd);
+            border-radius: 10px;
+            font-size: 16px
+        }
+
+        .row {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px
+        }
+
+        .btn {
+            flex: 1;
+            cursor: pointer;
+            padding: 12px 16px;
+            border-radius: 10px;
+            border: 1px solid var(--bd);
+            background: #fff;
+            font-weight: 700
+        }
+
+        .btn-acc {
+            border-color: transparent;
+            background: linear-gradient(90deg,var(--g1),var(--g2));
+            color: #fff
+        }
+
+        .hide {
+            display: none
+        }
+
+        .right {
+            position: absolute;
+            right: 12px;
+            top: 10px;
+            display: flex;
+            gap: 8px;
+            align-items: center
+        }
+
+        .tag {
+            border: 1px solid var(--bd);
+            border-radius: 999px;
+            padding: 6px 10px;
+            font-size: 12px;
+            color: #333;
+            background: #f9fafb
+        }
+
+        .linkbtn {
+            border: none;
+            background: none;
+            color: var(--g1);
+            font-weight: 700;
+            cursor: pointer
+        }
+
+            .linkbtn:active {
+                opacity: .7
+            }
+
+        .confirm-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            padding: 16px
+        }
+
+        .confirm-box {
+            background: #fff;
+            border-radius: 16px;
+            padding: 24px;
+            max-width: 800px;
+            width: 100%;
+            box-shadow: 0 20px 50px rgba(0,0,0,.25)
+        }
+
+        .confirm-title {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 12px;
+            text-align: center
+        }
+
+        .confirm-message {
+            color: var(--muted);
+            margin-bottom: 20px;
+            line-height: 1.5;
+            text-align: center
+        }
+
+        .confirm-choice {
+            background: linear-gradient(135deg,#fbbf24,#f59e0b);
+            color: #fff;
+            padding: 20px;
+            border-radius: 14px;
+            font-size: 32px;
+            font-weight: 800;
+            text-align: center;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 20px rgba(245,158,11,.3)
+        }
+
+        .confirm-choice-detail {
+            display: flex;
+            justify-content: space-around;
+            margin-bottom: 20px;
+            padding: 12px;
+            background: #f9fafb;
+            border-radius: 10px
+        }
+
+        .confirm-choice-item {
+            text-align: center
+        }
+
+        .confirm-choice-label {
+            font-size: 12px;
+            color: var(--muted);
+            margin-bottom: 4px
+        }
+
+        .confirm-choice-value {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--g1)
+        }
+
+        .confirm-buttons {
+            display: flex;
+            gap: 8px
+        }
+
+        .confirm-btn {
+            flex: 1;
+            padding: 16px;
+            border: none;
+            border-radius: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            font-size: 16px;
+            transition: transform .1s
+        }
+
+            .confirm-btn:hover {
+                transform: translateY(-2px)
+            }
+
+        .confirm-cancel {
+            background: #f3f4f6;
+            color: #666
+        }
+
+        .confirm-ok {
+            background: linear-gradient(90deg,var(--g1),var(--g2));
+            color: #fff;
+            box-shadow: 0 4px 12px rgba(34,197,94,.3)
+        }
+    </style>
 </head>
 <body>
     <header>

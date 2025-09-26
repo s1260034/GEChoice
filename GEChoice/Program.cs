@@ -14,14 +14,14 @@ var app = builder.Build();
 app.MapGet("/host-login", async ctx =>
 {
     var html = """
-            <!doctype html><html><body style="font-family:system-ui;">
-            <h2>Host Login</h2>
-            <form method="post" action="/host-login">
-              <input type="password" name="key" placeholder="Host Key" style="padding:8px;">
-              <button type="submit" style="padding:8px 12px;">OK</button>
-            </form>
-            </body></html>
-        """;
+        <!doctype html><html><body style="font-family:system-ui;">
+        <h2>Host Login</h2>
+        <form method="post" action="/host-login">
+          <input type="password" name="key" placeholder="Host Key" style="padding:8px;">
+          <button type="submit" style="padding:8px 12px;">OK</button>
+        </form>
+        </body></html>
+    """;
     ctx.Response.ContentType = "text/html; charset=utf-8";
     await ctx.Response.WriteAsync(html);
 });
