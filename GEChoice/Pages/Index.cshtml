@@ -2,7 +2,7 @@
 @inject IConfiguration Config
 @{
     ViewData["Title"] = "GECどっちでSHOW - ホスト";
-    var joinUrl = Config["JoinUrl"] ?? "http:192.168.10.3:8080/vote";
+    var joinUrl = Config["JoinUrl"] ?? "http://localhost:5000/vote";
 }
 <!DOCTYPE html>
 <html lang="ja">
@@ -24,7 +24,7 @@
             <button id="show-qr-modal" class="btn">QR</button>
             <button id="start-voting" class="btn btn-start">回答開始</button>
             <button id="stop-voting" class="btn btn-stop" style="display:none;">回答終了</button>
-            <button id="show-result" class="btn btn-result" style="display:none;">回答一覧</button>
+            <button id="show-result" class="btn btn-result" style="display:none;">回答一覧</button>ｄ
             <button id="prev" class="btn">前の問題</button>
             <button id="next" class="btn">次の問題</button>
             <button id="reset" class="btn">リセット</button>
