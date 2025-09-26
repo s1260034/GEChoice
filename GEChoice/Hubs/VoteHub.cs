@@ -25,7 +25,7 @@ namespace GEChoice.Hubs
         {
             new Question { Title = "第1問", Options = new[] { "A", "B" }, CorrectOption = "A" },
             new Question { Title = "第2問", Options = new[] { "A", "B" }, CorrectOption = "A" },
-            new Question { Title = "第3問", Options = new[] { "A", "B" }, CorrectOption = "A" }
+            new Question { Title = "第3問", Options = new[] { "A", "B" }, CorrectOption = "B" }
         };
 
         // ----- 投票 -----
