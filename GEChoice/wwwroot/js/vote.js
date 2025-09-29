@@ -117,6 +117,7 @@ conn.on('StateUpdated', s=>{
   const q=s.question||{}; const opts=q.options||[];
   isVotingOpen=s.isVotingOpen||false;
   const newIndex=s.currentIndex||0;
+  const isQuestionFinalized = s.isQuestionFinalized || false; // 問題が終了済みかどうか
 
   // 問題切替時に表示リセット
   if(newIndex!==currentQuestionIndex){
@@ -125,18 +126,23 @@ conn.on('StateUpdated', s=>{
     document.querySelectorAll('.choice').forEach(b=>b.classList.remove('selected-answer'));
   }
 
-  // サーバの自チーム回答が無ければ、ローカル保存を解放（=ホストが削除したケース）
+  // サーバから使用済み倍率を同期
   const myTeam=(getTeam()||'').trim();
+  if(s.usedMultipliersByTeam && myTeam && s.usedMultipliersByTeam[myTeam]){
+    const serverUsed = s.usedMultipliersByTeam[myTeam] || [];
+    // サーバーの使用済み倍率で上書き（真実の源泉）
+    usedMultipliers = [...serverUsed];
+    localStorage.setItem('gec_used_multipliers', JSON.stringify(usedMultipliers));
+  }
+
+  // サーバの自チーム回答が無ければ、ローカル保存を解放（=ホストが削除したケース）
   const serverHasMyVote = !!(s.clientVotes && myTeam && s.clientVotes[myTeam]);
   const localSaved = savedVotes[currentQuestionIndex];
   if(!serverHasMyVote && localSaved){
     const freed = Number(localSaved.multiplier||0);
     delete savedVotes[currentQuestionIndex];
     localStorage.setItem('gec_saved_votes', JSON.stringify(savedVotes));
-    if(freed && usedMultipliers.includes(freed)){
-      usedMultipliers = usedMultipliers.filter(x=>x!==freed);
-      localStorage.setItem('gec_used_multipliers', JSON.stringify(usedMultipliers));
-    }
+    // サーバー側で既に削除されているので、ローカルの倍率リストは更新しない
     hasVotedThisRound=false;
     currentSelectedOption=null;
     selectedMultiplier=0;
@@ -144,7 +150,11 @@ conn.on('StateUpdated', s=>{
 
   qTitle.textContent=q.title||'';
 
-  if(isVotingOpen){
+  // 終了済みの問題の場合は特別な処理
+  if(isQuestionFinalized){
+    votingArea.classList.add('hide'); votingClosed.classList.remove('hide');
+    msg.textContent='この問題は既に終了しています';
+  }else if(isVotingOpen){
     votingArea.classList.remove('hide'); votingClosed.classList.add('hide');
     msg.textContent = hasVotedThisRound ? `この問題は ${currentSelectedOption} (${savedVotes[currentQuestionIndex]?.multiplier||'?'}点) で回答済みです` : '点数を選択してから回答してください';
   }else{
@@ -158,7 +168,7 @@ conn.on('StateUpdated', s=>{
     const label=o.label??o.Label??'-';
     const b=document.createElement('button');
     b.className='choice'; b.textContent=`${label} を選ぶ`;
-    b.disabled=!teamNow || !isVotingOpen || selectedMultiplier===0 || hasVotedThisRound;
+    b.disabled=!teamNow || !isVotingOpen || selectedMultiplier===0 || hasVotedThisRound || isQuestionFinalized;
     if(currentSelectedOption===label) b.classList.add('selected-answer');
     b.onclick=()=>{
       if(!selectedMultiplier){ msg.textContent='先に点数を選択してください'; return; }
@@ -185,9 +195,16 @@ conn.on('VotingStatusChanged', isOpen=>{
       if(usedMultipliers.includes(v)){ btn.disabled=true; btn.classList.add('used'); btn.style.pointerEvents=''; btn.style.opacity=''; }
       else{ btn.disabled=false; btn.classList.remove('used'); btn.style.pointerEvents=''; btn.style.opacity=''; }
     });
-    selectedMultiplier=0;
+    // 未使用の最小倍率を自動選択
+    const availableButtons = Array.from(document.querySelectorAll('.multiplier-btn')).filter(btn => !btn.disabled && !btn.classList.contains('used'));
+    if(availableButtons.length > 0){
+      availableButtons[0].classList.add('selected');
+      selectedMultiplier = parseInt(availableButtons[0].dataset.value);
+    } else {
+      selectedMultiplier=0;
+    }
     votingArea.classList.remove('hide'); votingClosed.classList.add('hide');
-    msg.textContent='点数を選択してから回答してください';
+    msg.textContent = selectedMultiplier > 0 ? '回答する選択肢を選んでください' : '使用できる点数がありません';
     applySavedVoteUI();
   }else{
     votingArea.classList.add('hide'); votingClosed.classList.remove('hide'); msg.textContent='回答受付停止中';
@@ -368,7 +385,12 @@ window.addEventListener('load',()=>{
       updateVoteButtons(); msg.textContent=`${selectedMultiplier}点を選択しました`;
     });
   });
-  document.querySelector('.multiplier-btn[data-value="1"]').classList.add('selected');
+  // デフォルトで未使用の最小倍率を選択
+  const availableButtons = Array.from(document.querySelectorAll('.multiplier-btn')).filter(btn => !btn.disabled && !btn.classList.contains('used'));
+  if(availableButtons.length > 0){
+    availableButtons[0].classList.add('selected');
+    selectedMultiplier = parseInt(availableButtons[0].dataset.value);
+  }
 });
 
 /* リセット（ホスト操作反映） */
