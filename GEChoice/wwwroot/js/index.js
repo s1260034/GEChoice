@@ -176,6 +176,7 @@ conn.start().then(()=>conn.invoke("GetState")).catch(console.error);
 function render(s){
   const q=s.question||{}; const opts=q.options||[]; const counts=s.counts||{};
   const clientVotes=s.clientVotes||{}; const isVotingOpen=s.isVotingOpen;
+  const isQuestionFinalized = s.isQuestionFinalized || false;
 
   qTitle.textContent=q.title||''; const idx0=s.currentIndex||0; qNum.textContent=idx0+1;
 
@@ -199,8 +200,14 @@ function render(s){
     votingStatusDiv.innerHTML='<span class="status-indicator status-open"></span><span>回答受付中</span>';
     startTimer();
   }else{
-    startBtn.style.display='inline-block'; stopBtn.style.display='none';
-    votingStatusDiv.innerHTML='<span class="status-indicator status-closed"></span><span>回答受付停止中</span>';
+    // 終了済みの問題の場合は「回答開始」ボタンを非表示
+    if(isQuestionFinalized){
+      startBtn.style.display='none'; stopBtn.style.display='none';
+      votingStatusDiv.innerHTML='<span class="status-indicator status-closed"></span><span>この問題は終了済み</span>';
+    }else{
+      startBtn.style.display='inline-block'; stopBtn.style.display='none';
+      votingStatusDiv.innerHTML='<span class="status-indicator status-closed"></span><span>回答受付停止中</span>';
+    }
     stopTimer();
   }
 
@@ -308,6 +315,7 @@ document.getElementById('reset').onclick      =()=>{
     questionResultsDiv.innerHTML='<p class="muted">回答終了後に表示されます</p>';
     stopTimer();
     if(answerBtn){ answerBtn.style.display='none'; answerBtn.disabled=true; }
+    localStorage.removeItem(STORAGE_KEY);  // localStorageもクリア
   }
 };
 document.getElementById('close-answer-list').onclick=()=>{ document.getElementById('answer-list-modal').style.display='none'; };
@@ -320,3 +328,77 @@ function deleteVoteByTeam(teamName){
 
 // グローバル関数として公開
 window.deleteVoteByTeam = deleteVoteByTeam;
+
+// ===== localStorage バックアップ機能 =====
+const STORAGE_KEY = 'gec_host_backup';
+
+// 現在の状態をlocalStorageに保存
+function saveStateToLocalStorage() {
+  if (!currentState) return;
+
+  try {
+    const backup = {
+      currentState: currentState,
+      questionResults: questionResults,
+      timestamp: Date.now(),
+      isVotingOpen: isVotingOpenFlag,
+      hasSnapshot: hasSnapshotForThisQuestion
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(backup));
+  } catch (e) {
+    console.error('Failed to save state to localStorage:', e);
+  }
+}
+
+// localStorageから状態を復元
+function loadStateFromLocalStorage() {
+  try {
+    const data = localStorage.getItem(STORAGE_KEY);
+    if (!data) return false;
+
+    const backup = JSON.parse(data);
+
+    // 1時間以上前のデータは無視
+    if (Date.now() - backup.timestamp > 3600000) {
+      localStorage.removeItem(STORAGE_KEY);
+      return false;
+    }
+
+    // 復元
+    if (backup.currentState) {
+      currentState = backup.currentState;
+      questionResults = backup.questionResults || {};
+      isVotingOpenFlag = backup.isVotingOpen || false;
+      hasSnapshotForThisQuestion = backup.hasSnapshot || false;
+
+      // UIを更新
+      if (currentState) {
+        render(currentState);
+        refreshAnswerBtn();
+      }
+
+      console.log('State restored from localStorage');
+      return true;
+    }
+  } catch (e) {
+    console.error('Failed to load state from localStorage:', e);
+  }
+  return false;
+}
+
+// 定期的に自動保存（5秒ごと）
+setInterval(() => {
+  if (currentState) {
+    saveStateToLocalStorage();
+  }
+}, 5000);
+
+// ページ読み込み時に復元を試みる
+window.addEventListener('load', () => {
+  loadStateFromLocalStorage();
+});
+
+// ページを離れる前に保存
+window.addEventListener('beforeunload', () => {
+  saveStateToLocalStorage();
+});

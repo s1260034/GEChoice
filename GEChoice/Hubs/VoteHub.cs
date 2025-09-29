@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Configuration;
+using System.Text.Json;
+using System.IO;
 
 namespace GEChoice.Hubs
 {
@@ -42,6 +44,10 @@ namespace GEChoice.Hubs
         private static readonly ConcurrentDictionary<string, string?> _teamNames = new();   // 接続IDからチーム名の紐付け
         private static readonly ConcurrentDictionary<string, byte> _connections = new();    // 接続確認用（IDをセット、値はダミー）
 
+        // ----- ファイル永続化 -----
+        private static readonly string _stateFilePath = Path.Combine(Directory.GetCurrentDirectory(), "gamestate.json");
+        private static readonly SemaphoreSlim _fileSemaphore = new(1, 1);   // ファイル書き込みの排他制御
+        private static bool _hasLoadedState = false;                        // 起動時の読み込みフラグ
 
         // =====================
         // コンストラクタ
@@ -70,6 +76,13 @@ namespace GEChoice.Hubs
                     });
                 }
                 if (list.Count > 0) _questions = list;
+            }
+
+            // 起動時に状態を復元
+            if (!_hasLoadedState)
+            {
+                _hasLoadedState = true;
+                Task.Run(async () => await LoadGameStateFromFile());
             }
         }
 
@@ -199,9 +212,17 @@ namespace GEChoice.Hubs
         {
             if (!IsHost()) { await Clients.Caller.SendAsync("ShowAlert", "権限がありません"); return; }
 
+            // 既に確定済みの問題を再開する場合は、スナップショットから復元
+            if (_questionResults.ContainsKey(_currentIndex))
+            {
+                await Clients.Caller.SendAsync("ShowAlert", "回答を変更できます。再度回答してください。");
+                RestoreFromSnapshot(_currentIndex);
+            }
+
             _isVotingOpen = true;
             _votingStartUtc = DateTime.UtcNow; // ★ 計測開始
             await Clients.All.SendAsync("VotingStatusChanged", true);
+            await SaveGameStateToFile();  // 状態を保存
         }
 
         // 「回答終了ボタン」処理
@@ -238,6 +259,7 @@ namespace GEChoice.Hubs
             await Clients.All.SendAsync("ClosePerQuestionResults"); // モーダルを閉じる（全員）
             await Clients.All.SendAsync("StateUpdated", BuildState());
             await BroadcastParticipants();
+            await SaveGameStateToFile();  // 問題切り替え時に保存
         }
 
         // 「前の問題へ」ボタン処理
@@ -255,6 +277,7 @@ namespace GEChoice.Hubs
             await Clients.All.SendAsync("ClosePerQuestionResults");
             await Clients.All.SendAsync("StateUpdated", BuildState());
             await BroadcastParticipants();
+            await SaveGameStateToFile();  // 問題切り替え時に保存
         }
 
         // 「最終結果」ボタン処理
@@ -316,6 +339,16 @@ namespace GEChoice.Hubs
             await Clients.All.SendAsync("GameReset");
             await BroadcastInterimTotals();
             await BroadcastParticipants();
+
+            // ゲームリセット時はファイルも削除
+            try
+            {
+                if (File.Exists(_stateFilePath))
+                {
+                    File.Delete(_stateFilePath);
+                }
+            }
+            catch { /* エラーは無視 */ }
         }
 
         // 回答状況「削除」ボタン処理
@@ -489,6 +522,7 @@ namespace GEChoice.Hubs
                     await Clients.All.SendAsync("ShowPerQuestionResults", _currentIndex, snapshot);
                 }
                 await BroadcastInterimTotals();
+                await SaveGameStateToFile();  // 回答確定時に保存
             }
             finally
             {
@@ -625,8 +659,133 @@ namespace GEChoice.Hubs
                 clientVotes = grouped,
 
                 // ★ 追加フィールド
-                usedMultipliersByTeam = usedByTeam
+                usedMultipliersByTeam = usedByTeam,
+                isQuestionFinalized = _questionResults.ContainsKey(_currentIndex)
             };
+        }
+
+        // =====================
+        // ファイル永続化
+        // =====================
+        // ゲーム状態をファイルに保存
+        private static async Task SaveGameStateToFile()
+        {
+            await _fileSemaphore.WaitAsync();
+            try
+            {
+                var state = new GameState
+                {
+                    CurrentIndex = _currentIndex,
+                    IsVotingOpen = _isVotingOpen,
+                    VotingStartUtc = _votingStartUtc,
+                    ClientVotes = _clientVotes.ToDictionary(kv => kv.Key, kv => kv.Value),
+                    QuestionResults = _questionResults.ToDictionary(kv => kv.Key, kv => kv.Value),
+                    UsedMultipliers = _usedMultipliers.ToDictionary(kv => kv.Key, kv => kv.Value.ToList()),
+                    AggregateTotals = _aggregateTotals.ToDictionary(kv => kv.Key, kv => kv.Value),
+                    ResultsShown = _resultsShown.ToDictionary(kv => kv.Key, kv => kv.Value),
+                    TeamNames = _teamNames.ToDictionary(kv => kv.Key, kv => kv.Value),
+                    Answers = _answers.ToDictionary(kv => kv.Key, kv => kv.Value)
+                };
+
+                var options = new JsonSerializerOptions { WriteIndented = true };
+                var json = JsonSerializer.Serialize(state, options);
+                await File.WriteAllTextAsync(_stateFilePath, json);
+            }
+            finally
+            {
+                _fileSemaphore.Release();
+            }
+        }
+
+        // ファイルからゲーム状態を読み込み
+        private static async Task LoadGameStateFromFile()
+        {
+            if (!File.Exists(_stateFilePath)) return;
+
+            await _fileSemaphore.WaitAsync();
+            try
+            {
+                var json = await File.ReadAllTextAsync(_stateFilePath);
+                var state = JsonSerializer.Deserialize<GameState>(json);
+                if (state == null) return;
+
+                // 状態を復元
+                _currentIndex = state.CurrentIndex;
+                _isVotingOpen = state.IsVotingOpen;
+                _votingStartUtc = state.VotingStartUtc;
+
+                _clientVotes.Clear();
+                foreach (var kv in state.ClientVotes ?? new())
+                    _clientVotes[kv.Key] = kv.Value;
+
+                _questionResults.Clear();
+                foreach (var kv in state.QuestionResults ?? new())
+                    _questionResults[kv.Key] = kv.Value;
+
+                _usedMultipliers.Clear();
+                foreach (var kv in state.UsedMultipliers ?? new())
+                    _usedMultipliers[kv.Key] = new HashSet<int>(kv.Value ?? new List<int>());
+
+                _aggregateTotals.Clear();
+                foreach (var kv in state.AggregateTotals ?? new())
+                    _aggregateTotals[kv.Key] = kv.Value;
+
+                _resultsShown.Clear();
+                foreach (var kv in state.ResultsShown ?? new())
+                    _resultsShown[kv.Key] = kv.Value;
+
+                _teamNames.Clear();
+                foreach (var kv in state.TeamNames ?? new())
+                    _teamNames[kv.Key] = kv.Value;
+
+                _answers.Clear();
+                foreach (var kv in state.Answers ?? new())
+                    _answers[kv.Key] = kv.Value;
+            }
+            catch
+            {
+                // エラー時は無視（初期状態で開始）
+            }
+            finally
+            {
+                _fileSemaphore.Release();
+            }
+        }
+
+        // 問題のスナップショットから現在のバッファに復元（回答変更用）
+        private static void RestoreFromSnapshot(int questionIndex)
+        {
+            if (!_questionResults.TryGetValue(questionIndex, out var snapshot)) return;
+
+            // 現在のバッファをクリア
+            _answers.Clear();
+            _clientVotes.Clear();
+
+            // スナップショットから復元（ただし回答時間はリセット）
+            foreach (var result in snapshot)
+            {
+                if (string.IsNullOrWhiteSpace(result.ClientId)) continue;
+
+                _answers[result.ClientId] = result.SelectedOption;
+                _clientVotes[result.ClientId] = new ClientVote
+                {
+                    ClientId = result.ClientId,
+                    TeamName = result.TeamName,
+                    SelectedOption = result.SelectedOption,
+                    Multiplier = result.Multiplier,
+                    ResponseTime = 0  // 時間はリセット
+                };
+
+                // 使用済み倍率から除外（再選択可能にする）
+                var team = NormalizeTeam(result.TeamName);
+                if (_usedMultipliers.TryGetValue(team, out var used))
+                {
+                    lock (_lock) used.Remove(result.Multiplier);
+                }
+            }
+
+            // スナップショットを削除（再確定のため）
+            _questionResults.TryRemove(questionIndex, out _);
         }
 
         // =====================
@@ -676,6 +835,21 @@ namespace GEChoice.Hubs
             public string TeamName { get; set; } = "";
             public int TotalPoints { get; set; }
             public double TotalTime { get; set; }
+        }
+
+        // ゲーム状態の永続化用
+        private class GameState
+        {
+            public int CurrentIndex { get; set; }
+            public bool IsVotingOpen { get; set; }
+            public DateTime? VotingStartUtc { get; set; }
+            public Dictionary<string, ClientVote>? ClientVotes { get; set; }
+            public Dictionary<int, List<QuestionResult>>? QuestionResults { get; set; }
+            public Dictionary<string, List<int>>? UsedMultipliers { get; set; }
+            public Dictionary<string, (int Points, double Time)>? AggregateTotals { get; set; }
+            public Dictionary<int, bool>? ResultsShown { get; set; }
+            public Dictionary<string, string?>? TeamNames { get; set; }
+            public Dictionary<string, string>? Answers { get; set; }
         }
     }
 }

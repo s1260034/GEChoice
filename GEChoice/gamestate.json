@@ -1,0 +1,57 @@
+{
+  "CurrentIndex": 1,
+  "IsVotingOpen": false,
+  "VotingStartUtc": null,
+  "ClientVotes": {},
+  "QuestionResults": {
+    "0": [
+      {
+        "ClientId": "CE7kz0f5kviqrVMQPwymTA",
+        "TeamName": "aaaaa",
+        "SelectedOption": "A",
+        "Multiplier": 4,
+        "ResponseTime": 2.3740078,
+        "Points": 4
+      }
+    ],
+    "1": [
+      {
+        "ClientId": "CE7kz0f5kviqrVMQPwymTA",
+        "TeamName": "aaaaa",
+        "SelectedOption": "B",
+        "Multiplier": 2,
+        "ResponseTime": 4.5337394,
+        "Points": 2
+      }
+    ],
+    "2": [
+      {
+        "ClientId": "CE7kz0f5kviqrVMQPwymTA",
+        "TeamName": "aaaaa",
+        "SelectedOption": "A",
+        "Multiplier": 1,
+        "ResponseTime": 2.6954711,
+        "Points": 1
+      }
+    ]
+  },
+  "UsedMultipliers": {
+    "aaaaa": [
+      4,
+      2,
+      1
+    ]
+  },
+  "AggregateTotals": {
+    "aaaaa": {}
+  },
+  "ResultsShown": {
+    "0": true,
+    "1": true,
+    "2": true
+  },
+  "TeamNames": {
+    "CE7kz0f5kviqrVMQPwymTA": "aaaaa"
+  },
+  "Answers": {}
+}
