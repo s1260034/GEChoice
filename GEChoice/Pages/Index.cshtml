@@ -3,7 +3,7 @@
 @{
     ViewData["Title"] = "GECどっちでSHOW - ホスト";
     // IP統一：appsettings.json の JoinUrl を優先。未設定時のみ既定値を使用
-    var joinUrl = Config["JoinUrl"] ?? "http://localhost:5000/vote";
+    var joinUrl = Config["JoinUrl"] ?? "http://192.168.100.111:8080/vote";
 }
 <!DOCTYPE html>
 <html lang="ja">
