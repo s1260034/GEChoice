@@ -23,7 +23,7 @@ namespace GEChoice.Hubs
         private static int _currentIndex = 0;              // 現在の設問インデックス
         private static List<Question> _questions = new()   // 設問リスト
         {
-            new Question { Title = "第1問", Options = new[] { "A", "B" }, CorrectOption = "A" },
+            new Question { Title = "第1問", Options = new[] { "A", "B" }, CorrectOption = "A" },   // CorrectOotionは仮の値、（appsettings.jsonを参照）
             new Question { Title = "第2問", Options = new[] { "A", "B" }, CorrectOption = "A" },
             new Question { Title = "第3問", Options = new[] { "A", "B" }, CorrectOption = "B" }
         };

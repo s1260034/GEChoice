@@ -398,3 +398,38 @@ main {
     color: #fff;
     box-shadow: 0 4px 12px rgba(34,197,94,.3)
 }
+
+.q-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.countdown {
+    min-width: 96px;
+    text-align: center;
+    font-weight: 800;
+    font-size: 18px;
+    padding: 8px 12px;
+    border: 1px solid var(--bd);
+    border-radius: 999px;
+    background: #fff;
+}
+
+    .countdown.warning {
+        border-color: var(--red);
+        color: var(--red);
+    }
+
+.late-warning {
+    margin-top: 8px;
+    text-align: center;
+    font-size: 14px;
+    color: var(--red);
+    font-weight: 700;
+}
+
+.hide {
+    display: none;
+} 
