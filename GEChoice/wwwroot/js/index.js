@@ -51,6 +51,7 @@ let participantsLatest = [];
 // 受付/確定フラグ（表示制御の一元管理）
 let isVotingOpenFlag = false;
 let hasSnapshotForThisQuestion = false;
+let isQuestionStartedFlag = false;
 
 // =======================
 // タイマー（表示用）
@@ -154,6 +155,7 @@ conn.on("StateUpdated", s => {
     // フラグ更新
     isVotingOpenFlag = !!s.isVotingOpen;
     hasSnapshotForThisQuestion = !!questionResults[s.currentIndex || 0];
+    isQuestionStartedFlag = !!s.isQuestionStarted;
     render(s);
     refreshAnswerBtn();
 });
@@ -178,6 +180,11 @@ conn.on("VotingStatusChanged", isOpen => {
     }
     if (nextBtn) nextBtn.disabled = !!isOpen;
     if (prevBtn) prevBtn.disabled = !!isOpen;
+    if (startBtn) {
+        const canStart = (!isOpen) && (!isQuestionStartedFlag);
+        startBtn.disabled = !canStart;
+        startBtn.title = canStart ? '' : 'この問題は一度開始されているため再度開始できません（リセットで解除）';
+    }
     refreshAnswerBtn();
 });
 
@@ -314,6 +321,13 @@ function render(s) {
     // フラグ同期（設問が切り替わったら、その設問の確定有無で更新）
     isVotingOpenFlag = !!s.isVotingOpen;
     hasSnapshotForThisQuestion = !!questionResults[s.currentIndex || 0];
+    isQuestionStartedFlag = !!s.isQuestionStarted;
+
+    if (startBtn) {
+        const canStart = (!isVotingOpenFlag) && (!isQuestionStartedFlag);
+        startBtn.disabled = !canStart;
+        startBtn.title = canStart ? '' : 'この問題は一度開始されているため再度開始できません（リセットで解除）';
+    }
 
     refreshAnswerBtn();
 }
@@ -488,10 +502,13 @@ if (resetBtn) {
         if (confirm('すべてのデータをリセットしますか？')) {
             conn.invoke("ResetCounts");
             currentState = null; questionResults = {};
-            hasSnapshotForThisQuestion = false; isVotingOpenFlag = false;
+            hasSnapshotForThisQuestion = false;
+            isVotingOpenFlag = false;
+            isQuestionStartedFlag = false;
             if (questionResultsDiv) questionResultsDiv.innerHTML = '<p class="muted">回答終了後に表示されます</p>';
             stopTimer();
             if (answerBtn) { answerBtn.style.display = 'none'; answerBtn.disabled = true; }
+            if (startBtn) { startBtn.disabled = false; startBtn.title = ''; }
         }
     };
 }

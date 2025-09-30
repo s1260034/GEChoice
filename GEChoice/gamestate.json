@@ -1,49 +1,29 @@
 {
-  "CurrentIndex": 1,
+  "CurrentIndex": 2,
   "IsVotingOpen": false,
   "VotingStartUtc": null,
   "ClientVotes": {},
   "QuestionResults": {
     "0": [
       {
-        "ClientId": "CE7kz0f5kviqrVMQPwymTA",
-        "TeamName": "aaaaa",
-        "SelectedOption": "A",
-        "Multiplier": 4,
-        "ResponseTime": 2.3740078,
-        "Points": 4
-      }
-    ],
-    "1": [
-      {
-        "ClientId": "CE7kz0f5kviqrVMQPwymTA",
-        "TeamName": "aaaaa",
+        "ClientId": "7P8hjYy5Ns7KbYH6GVnYbg",
+        "TeamName": "vovovo-vo-vo-vovo",
         "SelectedOption": "B",
         "Multiplier": 2,
-        "ResponseTime": 4.5337394,
-        "Points": 2
+        "ResponseTime": 4.2172428,
+        "Points": 0
       }
     ],
-    "2": [
-      {
-        "ClientId": "CE7kz0f5kviqrVMQPwymTA",
-        "TeamName": "aaaaa",
-        "SelectedOption": "A",
-        "Multiplier": 1,
-        "ResponseTime": 2.6954711,
-        "Points": 1
-      }
-    ]
+    "1": [],
+    "2": []
   },
   "UsedMultipliers": {
-    "aaaaa": [
-      4,
-      2,
-      1
+    "vovovo-vo-vo-vovo": [
+      2
     ]
   },
   "AggregateTotals": {
-    "aaaaa": {}
+    "vovovo-vo-vo-vovo": {}
   },
   "ResultsShown": {
     "0": true,
@@ -51,7 +31,13 @@
     "2": true
   },
   "TeamNames": {
-    "CE7kz0f5kviqrVMQPwymTA": "aaaaa"
+    "CE7kz0f5kviqrVMQPwymTA": "aaaaa",
+    "7P8hjYy5Ns7KbYH6GVnYbg": "vovovo-vo-vo-vovo"
   },
-  "Answers": {}
+  "Answers": {},
+  "QuestionStarted": {
+    "0": true,
+    "1": true,
+    "2": true
+  }
 }

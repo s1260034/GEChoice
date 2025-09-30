@@ -38,6 +38,7 @@ namespace GEChoice.Hubs
         // ----- 途中経過／結果 -----
         private static readonly ConcurrentDictionary<string, (int Points, double Time)> _aggregateTotals = new();   // 途中経過の合計（Pointsは累計得点、Timeは累計回答時間）
         private static readonly ConcurrentDictionary<int, List<QuestionResult>> _questionResults = new();           // 設問の確定結果一覧（回答終了時に保存）
+        private static readonly ConcurrentDictionary<int, bool> _questionStarted = new();                           // 1度でも回答開始を押された問題フラグ
 
         // ----- チーム名 -----
         private static string NormalizeTeam(string? s) => (s ?? "").Trim();                 // 正規化（大文字小文字は保持）
@@ -210,19 +211,21 @@ namespace GEChoice.Hubs
         // 「回答開始ボタン」処理
         public async Task StartVoting()
         {
+            // 念のための認証されていないデバイスから押された場合のガード
             if (!IsHost()) { await Clients.Caller.SendAsync("ShowAlert", "権限がありません"); return; }
 
-            // 既に確定済みの問題を再開する場合は、スナップショットから復元
-            if (_questionResults.ContainsKey(_currentIndex))
+            // 一度でも開始した設問は「回答開始」ボタンを押せないようにする
+            if (_questionStarted.TryGetValue(_currentIndex, out var started) && started)
             {
-                await Clients.Caller.SendAsync("ShowAlert", "回答を変更できます。再度回答してください。");
-                RestoreFromSnapshot(_currentIndex);
+                await Clients.Caller.SendAsync("ShowAlert", "この問題は一度開始されています。再度「回答開始」はできません。");
+                return;
             }
 
-            _isVotingOpen = true;
-            _votingStartUtc = DateTime.UtcNow; // ★ 計測開始
-            await Clients.All.SendAsync("VotingStatusChanged", true);
-            await SaveGameStateToFile();  // 状態を保存
+            _isVotingOpen = true;                                       // 回答開始中フラグ
+            _votingStartUtc = DateTime.UtcNow;                          // 回答開始ボタンが押されたタイミングでタイマー始動
+            _questionStarted[_currentIndex] = true;                     // 回答開始した設問を保存
+            await Clients.All.SendAsync("VotingStatusChanged", true);   // 投票情報をブロードキャスト
+            await SaveGameStateToFile();                                // 状態を保存
         }
 
         // 「回答終了ボタン」処理
@@ -328,7 +331,8 @@ namespace GEChoice.Hubs
 
             _answers.Clear();
             _clientVotes.Clear();
-            _usedMultipliers.Clear();   // ★ゲーム全体のリセット時だけクリア
+            _usedMultipliers.Clear();
+            _questionStarted.Clear();
             _questionResults.Clear();
             _aggregateTotals.Clear();
             _resultsShown.Clear();
@@ -660,7 +664,8 @@ namespace GEChoice.Hubs
 
                 // ★ 追加フィールド
                 usedMultipliersByTeam = usedByTeam,
-                isQuestionFinalized = _questionResults.ContainsKey(_currentIndex)
+                isQuestionFinalized = _questionResults.ContainsKey(_currentIndex),
+                isQuestionStarted = _questionStarted.ContainsKey(_currentIndex) && _questionStarted[_currentIndex]
             };
         }
 
@@ -684,7 +689,8 @@ namespace GEChoice.Hubs
                     AggregateTotals = _aggregateTotals.ToDictionary(kv => kv.Key, kv => kv.Value),
                     ResultsShown = _resultsShown.ToDictionary(kv => kv.Key, kv => kv.Value),
                     TeamNames = _teamNames.ToDictionary(kv => kv.Key, kv => kv.Value),
-                    Answers = _answers.ToDictionary(kv => kv.Key, kv => kv.Value)
+                    Answers = _answers.ToDictionary(kv => kv.Key, kv => kv.Value),
+                    QuestionStarted = _questionStarted.ToDictionary(kv => kv.Key, kv => kv.Value)
                 };
 
                 var options = new JsonSerializerOptions { WriteIndented = true };
@@ -741,6 +747,10 @@ namespace GEChoice.Hubs
                 _answers.Clear();
                 foreach (var kv in state.Answers ?? new())
                     _answers[kv.Key] = kv.Value;
+
+                _questionStarted.Clear();
+                foreach (var kv in state.QuestionStarted ?? new())
+                    _questionStarted[kv.Key] = kv.Value;
             }
             catch
             {
@@ -850,6 +860,7 @@ namespace GEChoice.Hubs
             public Dictionary<int, bool>? ResultsShown { get; set; }
             public Dictionary<string, string?>? TeamNames { get; set; }
             public Dictionary<string, string>? Answers { get; set; }
+            public Dictionary<int, bool>? QuestionStarted { get; set; }
         }
     }
 }
