@@ -1,43 +1,13 @@
 {
-  "CurrentIndex": 2,
+  "CurrentIndex": 0,
   "IsVotingOpen": false,
   "VotingStartUtc": null,
   "ClientVotes": {},
-  "QuestionResults": {
-    "0": [
-      {
-        "ClientId": "7P8hjYy5Ns7KbYH6GVnYbg",
-        "TeamName": "vovovo-vo-vo-vovo",
-        "SelectedOption": "B",
-        "Multiplier": 2,
-        "ResponseTime": 4.2172428,
-        "Points": 0
-      }
-    ],
-    "1": [],
-    "2": []
-  },
-  "UsedMultipliers": {
-    "vovovo-vo-vo-vovo": [
-      2
-    ]
-  },
-  "AggregateTotals": {
-    "vovovo-vo-vo-vovo": {}
-  },
-  "ResultsShown": {
-    "0": true,
-    "1": true,
-    "2": true
-  },
-  "TeamNames": {
-    "CE7kz0f5kviqrVMQPwymTA": "aaaaa",
-    "7P8hjYy5Ns7KbYH6GVnYbg": "vovovo-vo-vo-vovo"
-  },
+  "QuestionResults": {},
+  "UsedMultipliers": {},
+  "AggregateTotals": {},
+  "ResultsShown": {},
+  "TeamNames": {},
   "Answers": {},
-  "QuestionStarted": {
-    "0": true,
-    "1": true,
-    "2": true
-  }
+  "QuestionStarted": {}
 }

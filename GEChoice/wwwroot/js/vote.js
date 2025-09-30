@@ -60,12 +60,19 @@ if (btnSave) btnSave.onclick = () => {
     const v = (teamInput.value || '').trim();
     if (!v) { teamInput.focus(); return; }
     setTeam(v); closeTeamModal(); text(msgEl, 'チーム名を設定しました');
+    invoke('UpdateTeamName', v);            // ★これを追加
 };
+
+// モーダル未使用の prompt 経路
 if (editTeamBtn) editTeamBtn.onclick = () => {
     const cur = getTeam();
     if (!openTeamModal(cur)) {
         const name = window.prompt('チーム名を入力してください', cur || '');
-        if (name != null) setTeam(name.trim());
+        if (name != null) {
+            const v = (name || '').trim();
+            setTeam(v);
+            invoke('UpdateTeamName', v);        // ★これを追加
+        }
     }
 };
 if (!getTeam()) openTeamModal('');
@@ -118,20 +125,24 @@ function updateVoteButtons() {
     const canVote = !!team && isVotingOpen && selectedMultiplier > 0 && !hasVotedThisRound;
     document.querySelectorAll('.choice').forEach(b => b.disabled = !canVote);
 }
+
+/* ===== 使用済み倍率の反映（ゲーム全体で使えない点を無効化） ===== */
 function applyUsedMultipliers(usedSet) {
     if (!multipliersEl) return;
     multipliersEl.querySelectorAll('.multiplier-btn').forEach(btn => {
         const v = Number(btn.getAttribute('data-value') || '0');
+        // まず lockAfterVote で残った状態を全解除
+        btn.disabled = false;
+        btn.style.pointerEvents = '';
+        btn.style.opacity = '';
         btn.classList.remove('used', 'selected');
+        // その上で「ゲーム全体で使用済み」のみ再度 disable
         if (usedSet.has(v)) {
             btn.disabled = true;
             btn.classList.add('used');
-        } else {
-            // このラウンド未回答なら再び触れる
-            btn.disabled = false;
         }
     });
-    // ラウンド開始時は未選択状態
+    // ラウンド開始時は未選択状態に戻す
     selectedMultiplier = 0;
 }
 
@@ -208,12 +219,12 @@ function showConfirmModal(label, teamName, multiplier) {
     modal.querySelector('.confirm-cancel').onclick = () => document.body.removeChild(modal);
     modal.querySelector('.confirm-ok').onclick = async () => {
         try {
-            // 送信＆即ロック（体感をキビキビに）— サーバからも後で MultiplierUsed が飛んできて二重で安全
+            // 送信＆即ロック（体感をキビキビに）
             currentSelectedOption = label;
             lockAfterVote(multiplier, label);
             await invoke('SubmitWithMultiplier', label, multiplier, teamName);
             text(msgEl, `${teamName ? `[${teamName}] ` : ''}${label} を ${multiplier}点で選択しました`);
-            try { navigator.vibrate && navigator.vibrate(15); } catch { }
+            try { navigator.vibrate && navigator.vibrate(15); } catch { /* noop */ }
         } finally {
             document.body.removeChild(modal);
         }
@@ -237,20 +248,25 @@ if (multipliersEl) {
 
 /* ===== Hubイベント ===== */
 connection.onreconnecting(() => setConn(false, '再接続中…'));
-connection.onreconnected(() => setConn(true, 'オンライン'));
+connection.onreconnected(async () => {
+    setConn(true, 'オンライン');
+    await invoke('GetState');
+    const t = getTeam();
+    if (t) { invoke('UpdateTeamName', t); }
+});
 connection.onclose(() => setConn(false, '切断'));
 
-/* 正史：BuildState に合わせる（question.title / options[].label / usedMultipliersByTeam / currentIndex / isVotingOpen / votingStartTime） */
-connection.on('StateUpdated', (state) => {
+/* 正史：BuildState に合わせる（question.title / options[].label or ["A","B"] / usedMultipliersByTeam / currentIndex / isVotingOpen / votingStartTime） */
+connection.on('StateUpdated', async (state) => {
     try {
         setConn(true);
-        isVotingOpen = !!state.isVotingOpen;
+        isVotingOpen = !!state?.isVotingOpen;
 
         // タイトル
         text(qTitle, state?.question?.title || '問題');
 
         // 問切替検知：回答ロックの解除（次の問題へ）
-        const newIndex = Number(state.currentIndex || 0);
+        const newIndex = Number(state?.currentIndex || 0);
         if (newIndex !== currentQuestionIndex) {
             currentQuestionIndex = newIndex;
             hasVotedThisRound = false;
@@ -261,14 +277,16 @@ connection.on('StateUpdated', (state) => {
             multipliersEl?.querySelectorAll('.multiplier-btn').forEach(b => b.classList.remove('selected'));
         }
 
-        // 選択肢
-        const opts = (state?.question?.options || []).map(o => o.label);
+        // 選択肢（"['A','B']" または "[{label:'A'},{label:'B'}]" の両対応）
+        const rawOpts = Array.isArray(state?.question?.options) ? state.question.options : [];
+        const opts = rawOpts.map(o => (typeof o === 'string' ? o : (o?.label ?? '')))
+            .filter(s => typeof s === 'string' && s.length > 0);
         renderChoices(opts);
 
         // 受付表示とタイマー
         if (isVotingOpen) {
             votingArea.classList.remove('hide'); votingClosed.classList.add('hide');
-            if (state.votingStartTime) { startCountdownFromUtc(state.votingStartTime); }
+            if (state?.votingStartTime) { startCountdownFromUtc(state.votingStartTime); }
             else { setTimeout(() => startCountdownFromUtc(new Date().toISOString()), 300); }
         } else {
             votingArea.classList.add('hide'); votingClosed.classList.remove('hide');
@@ -277,12 +295,19 @@ connection.on('StateUpdated', (state) => {
 
         // チームごとの使用済み倍率を反映（このゲーム全体で使えない点を無効化）
         const team = getTeam();
-        const used = new Set((state.usedMultipliersByTeam && team) ? (state.usedMultipliersByTeam[team] || []) : []);
+        const usedList = (state && state.usedMultipliersByTeam && team)
+            ? (state.usedMultipliersByTeam[team] || [])
+            : [];
+        const used = new Set(Array.isArray(usedList) ? usedList : []);
         applyUsedMultipliers(used);
 
         // ラウンド中ロックの最終調整
         updateVoteButtons();
-    } catch (e) { console.error('StateUpdated error', e); }
+    } catch (e) {
+        console.error('StateUpdated error', e);
+        // 例外で描画が止まっても状態を取り直して自己復旧を試みる
+        try { await invoke('GetState'); } catch { /* noop */ }
+    }
 });
 
 /* 受付状態の単発更新：即時タイマーを暫定開始→GetStateで厳密同期 */
@@ -297,7 +322,7 @@ connection.on('VotingStatusChanged', (isOpen) => {
         votingArea.classList.remove('hide'); votingClosed.classList.add('hide');
         text(msgEl, '点数を選択してから回答してください');
         startCountdownFromUtc(new Date().toISOString());
-        invoke('GetState'); // 厳密時刻で上書き
+        invoke('GetState'); // 厳密時刻・使用済み倍率などを上書き
     } else {
         votingArea.classList.add('hide'); votingClosed.classList.remove('hide');
         clearCountdown();
@@ -347,7 +372,14 @@ connection.on('QuestionChanged', (title, options) => {
     try {
         await connection.start();
         setConn(true);
+
+        // 1) まず状態を取得して UI 準備
         await invoke('GetState');
+
+        // 2) その後にチーム名を送る（保存済みだけ）
+        const t = getTeam();
+        if (t) { await invoke('UpdateTeamName', t); }
+
     } catch (e) {
         console.error('SignalR connection error', e);
         setConn(false, '接続失敗');

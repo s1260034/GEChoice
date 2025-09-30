@@ -152,11 +152,19 @@ function refreshAnswerBtn() {
 // =======================
 conn.on("StateUpdated", s => {
     currentState = s;
-    // フラグ更新
+
+    // フラグ更新（設問ごと）
     isVotingOpenFlag = !!s.isVotingOpen;
-    hasSnapshotForThisQuestion = !!questionResults[s.currentIndex || 0];
+    hasSnapshotForThisQuestion = !!(s.isQuestionFinalized || questionResults[s.currentIndex || 0]);
     isQuestionStartedFlag = !!s.isQuestionStarted;
+
+    // 画面更新
     render(s);
+
+    // サーバ最新状態を再取得（既存仕様踏襲）
+    conn.invoke("GetState");
+
+    // ボタン表示制御
     refreshAnswerBtn();
 });
 
@@ -289,7 +297,7 @@ function render(s) {
     // 問1は前へ非表示
     if (prevBtn) prevBtn.style.visibility = idx0 === 0 ? 'hidden' : 'visible';
 
-    // 集計ボックス
+    // 集計ボックス（★修正: endChild -> appendChild）
     if (optsDiv) {
         optsDiv.innerHTML = '';
         for (const o of opts) {
@@ -297,12 +305,14 @@ function render(s) {
             const box = document.createElement('div');
             box.className = 'opt';
             box.innerHTML = `<div style="font-weight:800;margin:6px 0;">${label}</div><div class="num">${counts[label] ?? 0}</div>`;
-            optsDiv.appendChild(box);
+            optsDiv.appendChild(box); // ← ここを appendChild に修正
         }
     }
 
+    // クライアント回答一覧
     displayClientStatus(clientVotes);
 
+    // 受付状態のUI
     if (isVotingOpen) {
         if (startBtn) startBtn.style.display = 'none';
         if (stopBtn) stopBtn.style.display = 'inline-block';
@@ -318,11 +328,14 @@ function render(s) {
     if (prevBtn) prevBtn.disabled = !!isVotingOpen;
     if (nextBtn) nextBtn.disabled = !!isVotingOpen;
 
-    // フラグ同期（設問が切り替わったら、その設問の確定有無で更新）
+    // フラグ同期（設問が切り替わったら、その設問の確定/開始状態で更新）
     isVotingOpenFlag = !!s.isVotingOpen;
-    hasSnapshotForThisQuestion = !!questionResults[s.currentIndex || 0];
+    hasSnapshotForThisQuestion = !!(s.isQuestionFinalized || questionResults[s.currentIndex || 0]);
     isQuestionStartedFlag = !!s.isQuestionStarted;
 
+    // 「回答開始」ボタンの活性条件:
+    // ・受付中ではない
+    // ・この設問が未開始（開始済みはリセットでのみ解除）
     if (startBtn) {
         const canStart = (!isVotingOpenFlag) && (!isQuestionStartedFlag);
         startBtn.disabled = !canStart;

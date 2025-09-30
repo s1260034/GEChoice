@@ -44,6 +44,8 @@ namespace GEChoice.Hubs
         private static string NormalizeTeam(string? s) => (s ?? "").Trim();                 // 正規化（大文字小文字は保持）
         private static readonly ConcurrentDictionary<string, string?> _teamNames = new();   // 接続IDからチーム名の紐付け
         private static readonly ConcurrentDictionary<string, byte> _connections = new();    // 接続確認用（IDをセット、値はダミー）
+        private static long _seqCounter = 0;
+        private static readonly ConcurrentDictionary<string, long> _arrivalSeq = new();
 
         // ----- ファイル永続化 -----
         private static readonly string _stateFilePath = Path.Combine(Directory.GetCurrentDirectory(), "gamestate.json");
@@ -102,6 +104,8 @@ namespace GEChoice.Hubs
         public override async Task OnConnectedAsync()
         {
             _connections[Context.ConnectionId] = 1;
+            _arrivalSeq[Context.ConnectionId] = Interlocked.Increment(ref _seqCounter); // ★
+
             await Clients.Caller.SendAsync("StateUpdated", BuildState());
             await BroadcastParticipants();
             await base.OnConnectedAsync();
@@ -112,9 +116,9 @@ namespace GEChoice.Hubs
         {
             _answers.TryRemove(Context.ConnectionId, out _);
             _clientVotes.TryRemove(Context.ConnectionId, out _);
-            // _usedMultipliers は teamName キーなので、切断では削除しない
             _teamNames.TryRemove(Context.ConnectionId, out _);
             _connections.TryRemove(Context.ConnectionId, out _);
+            _arrivalSeq.TryRemove(Context.ConnectionId, out _); // ★
 
             await Clients.All.SendAsync("StateUpdated", BuildState());
             await BroadcastParticipants();
@@ -339,6 +343,8 @@ namespace GEChoice.Hubs
             _isVotingOpen = false;
             _votingStartUtc = null;
 
+            _teamNames.Clear();
+
             await Clients.All.SendAsync("StateUpdated", BuildState());
             await Clients.All.SendAsync("GameReset");
             await BroadcastInterimTotals();
@@ -561,57 +567,31 @@ namespace GEChoice.Hubs
         // 参加者の回答反映
         private List<object> BuildParticipants()
         {
-            // 回答済みの最新状態をチーム名で集約（無名は除外）
-            var groupedAnswered = _clientVotes.Values
-                .Where(v => !string.IsNullOrWhiteSpace(v.TeamName))
-                .GroupBy(v => (v.TeamName ?? "").Trim())
-                .ToDictionary(
-                    g => g.Key,
-                    g => {
-                        var v = g.Last();
-                        return new
-                        {
-                            selectedOption = v.SelectedOption,
-                            multiplier = v.Multiplier,
-                            responseTime = v.ResponseTime
-                        };
-                    });
+            var list = new List<(long seq, object row)>();
 
-            // 表示対象のチーム名（明示登録 + 投票で出現 + 途中経過0点のチーム）
-            var teamSet = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var kv in _teamNames)
+            foreach (var connId in _connections.Keys)
             {
-                var name = (kv.Value ?? "").Trim();
-                if (!string.IsNullOrEmpty(name)) teamSet.Add(name);
-            }
-            foreach (var v in _clientVotes.Values)
-            {
-                var name = (v.TeamName ?? "").Trim();
-                if (!string.IsNullOrEmpty(name)) teamSet.Add(name);
-            }
-            foreach (var name in _aggregateTotals.Keys)
-            {
-                if (!string.IsNullOrWhiteSpace(name)) teamSet.Add(name.Trim());
-            }
+                var seq = _arrivalSeq.TryGetValue(connId, out var s) ? s : long.MaxValue;
 
-            var participants = teamSet
-                .Select(team =>
+                // チーム名（未設定は "(未設定)" で表示）
+                var raw = _teamNames.TryGetValue(connId, out var t) ? (t ?? "") : "";
+                var team = string.IsNullOrWhiteSpace(raw) ? "(未設定)" : raw.Trim();
+
+                // 回答状況（この接続IDで回答していれば反映）
+                bool has = _clientVotes.TryGetValue(connId, out var v);
+                var row = new
                 {
-                    var has = groupedAnswered.TryGetValue(team, out var ans);
-                    return new
-                    {
-                        teamName = team,
-                        hasAnswered = has,
-                        selectedOption = has ? ans!.selectedOption : "-",
-                        multiplier = has ? ans!.multiplier : 0,
-                        responseTime = has ? ans!.responseTime : 0d
-                    };
-                })
-                .OrderBy(p => p.teamName, StringComparer.Ordinal)
-                .Cast<object>()
-                .ToList();
+                    teamName = team,
+                    hasAnswered = has,
+                    selectedOption = has ? v!.SelectedOption : "-",
+                    multiplier = has ? v!.Multiplier : 0,
+                    responseTime = has ? v!.ResponseTime : 0d
+                };
 
-            return participants;
+                list.Add((seq, row));
+            }
+
+            return list.OrderBy(x => x.seq).Select(x => x.row).Cast<object>().ToList();
         }
 
         // クライアントへ配信する現在の状態の情報設定
