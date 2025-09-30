@@ -297,6 +297,10 @@ function render(s) {
     // 問1は前へ非表示
     if (prevBtn) prevBtn.style.visibility = idx0 === 0 ? 'hidden' : 'visible';
 
+    // 最終問題は次へ非表示
+    const totalQuestions = s.totalQuestions || 3;
+    if (nextBtn) nextBtn.style.visibility = idx0 === totalQuestions - 1 ? 'hidden' : 'visible';
+
     // 集計ボックス（★修正: endChild -> appendChild）
     if (optsDiv) {
         optsDiv.innerHTML = '';
@@ -521,7 +525,10 @@ if (resetBtn) {
             if (questionResultsDiv) questionResultsDiv.innerHTML = '<p class="muted">回答終了後に表示されます</p>';
             stopTimer();
             if (answerBtn) { answerBtn.style.display = 'none'; answerBtn.disabled = true; }
-            if (startBtn) { startBtn.disabled = false; startBtn.title = ''; }
+              if (startBtn) { startBtn.disabled = false; startBtn.title = ''; }
+              // localStorageもクリア
+            localStorage.removeItem('gec_host_backup');
+            localStorage.clear();
         }
     };
 }
