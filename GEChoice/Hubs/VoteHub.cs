@@ -38,11 +38,14 @@ namespace GEChoice.Hubs
         // ----- 途中経過／結果 -----
         private static readonly ConcurrentDictionary<string, (int Points, double Time)> _aggregateTotals = new();   // 途中経過の合計（Pointsは累計得点、Timeは累計回答時間）
         private static readonly ConcurrentDictionary<int, List<QuestionResult>> _questionResults = new();           // 設問の確定結果一覧（回答終了時に保存）
+        private static readonly ConcurrentDictionary<int, bool> _questionStarted = new();                           // 1度でも回答開始を押された問題フラグ
 
         // ----- チーム名 -----
         private static string NormalizeTeam(string? s) => (s ?? "").Trim();                 // 正規化（大文字小文字は保持）
         private static readonly ConcurrentDictionary<string, string?> _teamNames = new();   // 接続IDからチーム名の紐付け
         private static readonly ConcurrentDictionary<string, byte> _connections = new();    // 接続確認用（IDをセット、値はダミー）
+        private static long _seqCounter = 0;
+        private static readonly ConcurrentDictionary<string, long> _arrivalSeq = new();
 
         // ----- ファイル永続化 -----
         private static readonly string _stateFilePath = Path.Combine(Directory.GetCurrentDirectory(), "gamestate.json");
@@ -101,6 +104,8 @@ namespace GEChoice.Hubs
         public override async Task OnConnectedAsync()
         {
             _connections[Context.ConnectionId] = 1;
+            _arrivalSeq[Context.ConnectionId] = Interlocked.Increment(ref _seqCounter); // ★
+
             await Clients.Caller.SendAsync("StateUpdated", BuildState());
             await BroadcastParticipants();
             await base.OnConnectedAsync();
@@ -111,9 +116,9 @@ namespace GEChoice.Hubs
         {
             _answers.TryRemove(Context.ConnectionId, out _);
             _clientVotes.TryRemove(Context.ConnectionId, out _);
-            // _usedMultipliers は teamName キーなので、切断では削除しない
             _teamNames.TryRemove(Context.ConnectionId, out _);
             _connections.TryRemove(Context.ConnectionId, out _);
+            _arrivalSeq.TryRemove(Context.ConnectionId, out _); // ★
 
             await Clients.All.SendAsync("StateUpdated", BuildState());
             await BroadcastParticipants();
@@ -210,19 +215,21 @@ namespace GEChoice.Hubs
         // 「回答開始ボタン」処理
         public async Task StartVoting()
         {
+            // 念のための認証されていないデバイスから押された場合のガード
             if (!IsHost()) { await Clients.Caller.SendAsync("ShowAlert", "権限がありません"); return; }
 
-            // 既に確定済みの問題を再開する場合は、スナップショットから復元
-            if (_questionResults.ContainsKey(_currentIndex))
+            // 一度でも開始した設問は「回答開始」ボタンを押せないようにする
+            if (_questionStarted.TryGetValue(_currentIndex, out var started) && started)
             {
-                await Clients.Caller.SendAsync("ShowAlert", "回答を変更できます。再度回答してください。");
-                RestoreFromSnapshot(_currentIndex);
+                await Clients.Caller.SendAsync("ShowAlert", "この問題は一度開始されています。再度「回答開始」はできません。");
+                return;
             }
 
-            _isVotingOpen = true;
-            _votingStartUtc = DateTime.UtcNow; // ★ 計測開始
-            await Clients.All.SendAsync("VotingStatusChanged", true);
-            await SaveGameStateToFile();  // 状態を保存
+            _isVotingOpen = true;                                       // 回答開始中フラグ
+            _votingStartUtc = DateTime.UtcNow;                          // 回答開始ボタンが押されたタイミングでタイマー始動
+            _questionStarted[_currentIndex] = true;                     // 回答開始した設問を保存
+            await Clients.All.SendAsync("VotingStatusChanged", true);   // 投票情報をブロードキャスト
+            await SaveGameStateToFile();                                // 状態を保存
         }
 
         // 「回答終了ボタン」処理
@@ -328,12 +335,15 @@ namespace GEChoice.Hubs
 
             _answers.Clear();
             _clientVotes.Clear();
-            _usedMultipliers.Clear();   // ★ゲーム全体のリセット時だけクリア
+            _usedMultipliers.Clear();
+            _questionStarted.Clear();
             _questionResults.Clear();
             _aggregateTotals.Clear();
             _resultsShown.Clear();
             _isVotingOpen = false;
             _votingStartUtc = null;
+
+            _teamNames.Clear();
 
             await Clients.All.SendAsync("StateUpdated", BuildState());
             await Clients.All.SendAsync("GameReset");
@@ -557,57 +567,31 @@ namespace GEChoice.Hubs
         // 参加者の回答反映
         private List<object> BuildParticipants()
         {
-            // 回答済みの最新状態をチーム名で集約（無名は除外）
-            var groupedAnswered = _clientVotes.Values
-                .Where(v => !string.IsNullOrWhiteSpace(v.TeamName))
-                .GroupBy(v => (v.TeamName ?? "").Trim())
-                .ToDictionary(
-                    g => g.Key,
-                    g => {
-                        var v = g.Last();
-                        return new
-                        {
-                            selectedOption = v.SelectedOption,
-                            multiplier = v.Multiplier,
-                            responseTime = v.ResponseTime
-                        };
-                    });
+            var list = new List<(long seq, object row)>();
 
-            // 表示対象のチーム名（明示登録 + 投票で出現 + 途中経過0点のチーム）
-            var teamSet = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var kv in _teamNames)
+            foreach (var connId in _connections.Keys)
             {
-                var name = (kv.Value ?? "").Trim();
-                if (!string.IsNullOrEmpty(name)) teamSet.Add(name);
-            }
-            foreach (var v in _clientVotes.Values)
-            {
-                var name = (v.TeamName ?? "").Trim();
-                if (!string.IsNullOrEmpty(name)) teamSet.Add(name);
-            }
-            foreach (var name in _aggregateTotals.Keys)
-            {
-                if (!string.IsNullOrWhiteSpace(name)) teamSet.Add(name.Trim());
-            }
+                var seq = _arrivalSeq.TryGetValue(connId, out var s) ? s : long.MaxValue;
 
-            var participants = teamSet
-                .Select(team =>
+                // チーム名（未設定は "(未設定)" で表示）
+                var raw = _teamNames.TryGetValue(connId, out var t) ? (t ?? "") : "";
+                var team = string.IsNullOrWhiteSpace(raw) ? "(未設定)" : raw.Trim();
+
+                // 回答状況（この接続IDで回答していれば反映）
+                bool has = _clientVotes.TryGetValue(connId, out var v);
+                var row = new
                 {
-                    var has = groupedAnswered.TryGetValue(team, out var ans);
-                    return new
-                    {
-                        teamName = team,
-                        hasAnswered = has,
-                        selectedOption = has ? ans!.selectedOption : "-",
-                        multiplier = has ? ans!.multiplier : 0,
-                        responseTime = has ? ans!.responseTime : 0d
-                    };
-                })
-                .OrderBy(p => p.teamName, StringComparer.Ordinal)
-                .Cast<object>()
-                .ToList();
+                    teamName = team,
+                    hasAnswered = has,
+                    selectedOption = has ? v!.SelectedOption : "-",
+                    multiplier = has ? v!.Multiplier : 0,
+                    responseTime = has ? v!.ResponseTime : 0d
+                };
 
-            return participants;
+                list.Add((seq, row));
+            }
+
+            return list.OrderBy(x => x.seq).Select(x => x.row).Cast<object>().ToList();
         }
 
         // クライアントへ配信する現在の状態の情報設定
@@ -660,7 +644,8 @@ namespace GEChoice.Hubs
 
                 // ★ 追加フィールド
                 usedMultipliersByTeam = usedByTeam,
-                isQuestionFinalized = _questionResults.ContainsKey(_currentIndex)
+                isQuestionFinalized = _questionResults.ContainsKey(_currentIndex),
+                isQuestionStarted = _questionStarted.ContainsKey(_currentIndex) && _questionStarted[_currentIndex]
             };
         }
 
@@ -684,7 +669,8 @@ namespace GEChoice.Hubs
                     AggregateTotals = _aggregateTotals.ToDictionary(kv => kv.Key, kv => kv.Value),
                     ResultsShown = _resultsShown.ToDictionary(kv => kv.Key, kv => kv.Value),
                     TeamNames = _teamNames.ToDictionary(kv => kv.Key, kv => kv.Value),
-                    Answers = _answers.ToDictionary(kv => kv.Key, kv => kv.Value)
+                    Answers = _answers.ToDictionary(kv => kv.Key, kv => kv.Value),
+                    QuestionStarted = _questionStarted.ToDictionary(kv => kv.Key, kv => kv.Value)
                 };
 
                 var options = new JsonSerializerOptions { WriteIndented = true };
@@ -741,6 +727,10 @@ namespace GEChoice.Hubs
                 _answers.Clear();
                 foreach (var kv in state.Answers ?? new())
                     _answers[kv.Key] = kv.Value;
+
+                _questionStarted.Clear();
+                foreach (var kv in state.QuestionStarted ?? new())
+                    _questionStarted[kv.Key] = kv.Value;
             }
             catch
             {
@@ -850,6 +840,7 @@ namespace GEChoice.Hubs
             public Dictionary<int, bool>? ResultsShown { get; set; }
             public Dictionary<string, string?>? TeamNames { get; set; }
             public Dictionary<string, string>? Answers { get; set; }
+            public Dictionary<int, bool>? QuestionStarted { get; set; }
         }
     }
 }

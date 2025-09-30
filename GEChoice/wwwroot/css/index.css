@@ -208,3 +208,7 @@ th {
     .delete-btn:hover {
         background: #dc2626
     }
+
+.hide {
+    display: none !important;
+}
