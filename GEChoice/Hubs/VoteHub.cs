@@ -585,9 +585,13 @@ namespace GEChoice.Hubs
             {
                 var seq = _arrivalSeq.TryGetValue(connId, out var s) ? s : long.MaxValue;
 
-                // チーム名（未設定は "(未設定)" で表示）
+                // チーム名（未設定はスキップ）
                 var raw = _teamNames.TryGetValue(connId, out var t) ? (t ?? "") : "";
-                var team = string.IsNullOrWhiteSpace(raw) ? "(未設定)" : raw.Trim();
+                if (string.IsNullOrWhiteSpace(raw))
+                {
+                    continue;  // チーム名未設定の接続は参加者一覧に表示しない
+                }
+                var team = raw.Trim();
 
                 // 回答状況（この接続IDで回答していれば反映）
                 bool has = _clientVotes.TryGetValue(connId, out var v);
