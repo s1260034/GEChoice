@@ -543,12 +543,24 @@ namespace GEChoice.Hubs
         // 途中経過
         private Task BroadcastInterimTotals()
         {
-            var list = _aggregateTotals
-                .Select(kv => new
+            // 登録済みの全チーム名を取得（未設定は除外）
+            var allTeams = _teamNames.Values
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Select(name => name!.Trim())
+                .Distinct()
+                .ToHashSet();
+
+            // 回答済みチームと未回答チームを統合
+            var list = allTeams
+                .Select(teamName =>
                 {
-                    teamName = kv.Key,
-                    totalPoints = kv.Value.Points,
-                    totalTime = kv.Value.Time
+                    var hasData = _aggregateTotals.TryGetValue(teamName, out var data);
+                    return new
+                    {
+                        teamName = teamName,
+                        totalPoints = hasData ? data.Points : 0,
+                        totalTime = hasData ? data.Time : 0.0
+                    };
                 })
                 .OrderByDescending(x => x.totalPoints)
                 .ThenBy(x => x.totalTime)               // 途中経過も同じ並び方に
