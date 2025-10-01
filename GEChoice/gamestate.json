@@ -1,57 +1,57 @@
 {
   "CurrentIndex": 2,
   "IsVotingOpen": false,
-  "VotingStartUtc": "2025-10-01T07:12:31.9214455Z",
+  "VotingStartUtc": "2025-10-01T08:42:07.551636Z",
   "ClientVotes": {
-    "6JojipOAH49kiWrW0rY6Iw": {
-      "ClientId": "6JojipOAH49kiWrW0rY6Iw",
-      "TeamName": "\u30C1\u30FC\u30E01",
+    "WSgLb_6fjP7mOzYVOsl81w": {
+      "ClientId": "WSgLb_6fjP7mOzYVOsl81w",
+      "TeamName": "\u0060",
       "SelectedOption": "B",
-      "Multiplier": 2,
-      "ResponseTime": 2.6130036
+      "Multiplier": 4,
+      "ResponseTime": 3.2731702
     }
   },
   "QuestionResults": {
     "0": [
       {
-        "ClientId": "6JojipOAH49kiWrW0rY6Iw",
-        "TeamName": "\u30C1\u30FC\u30E01",
-        "SelectedOption": "B",
-        "Multiplier": 4,
-        "ResponseTime": 2.1507284,
-        "Points": 0
+        "ClientId": "WSgLb_6fjP7mOzYVOsl81w",
+        "TeamName": "\u0060",
+        "SelectedOption": "A",
+        "Multiplier": 2,
+        "ResponseTime": 3.2183218,
+        "Points": 2
       }
     ],
     "1": [
       {
-        "ClientId": "6JojipOAH49kiWrW0rY6Iw",
-        "TeamName": "\u30C1\u30FC\u30E01",
+        "ClientId": "WSgLb_6fjP7mOzYVOsl81w",
+        "TeamName": "\u0060",
         "SelectedOption": "A",
         "Multiplier": 1,
-        "ResponseTime": 2.5825903,
+        "ResponseTime": 4.6114386,
         "Points": 1
       }
     ],
     "2": [
       {
-        "ClientId": "6JojipOAH49kiWrW0rY6Iw",
-        "TeamName": "\u30C1\u30FC\u30E01",
+        "ClientId": "WSgLb_6fjP7mOzYVOsl81w",
+        "TeamName": "\u0060",
         "SelectedOption": "B",
-        "Multiplier": 2,
-        "ResponseTime": 2.6130036,
-        "Points": 2
+        "Multiplier": 4,
+        "ResponseTime": 3.2731702,
+        "Points": 4
       }
     ]
   },
   "UsedMultipliers": {
-    "\u30C1\u30FC\u30E01": [
-      4,
+    "\u0060": [
+      2,
       1,
-      2
+      4
     ]
   },
   "AggregateTotals": {
-    "\u30C1\u30FC\u30E01": {}
+    "\u0060": {}
   },
   "ResultsShown": {
     "0": true,
@@ -59,10 +59,10 @@
     "2": true
   },
   "TeamNames": {
-    "6JojipOAH49kiWrW0rY6Iw": "\u30C1\u30FC\u30E01"
+    "WSgLb_6fjP7mOzYVOsl81w": "\u0060"
   },
   "Answers": {
-    "6JojipOAH49kiWrW0rY6Iw": "B"
+    "WSgLb_6fjP7mOzYVOsl81w": "B"
   },
   "QuestionStarted": {
     "0": true,

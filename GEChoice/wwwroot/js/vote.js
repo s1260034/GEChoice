@@ -367,6 +367,99 @@ connection.on('QuestionChanged', (title, options) => {
     updateVoteButtons();
 });
 
+/* ===== 回答一覧モーダル ===== */
+connection.on('ShowPerQuestionResults', (index, rows) => {
+    const modal = $('answer-list-modal');
+    const titleEl = $('answer-list-title');
+    const questionEl = $('answer-list-question');
+    const contentEl = $('answer-list-content');
+
+    if (!modal || !contentEl) return;
+
+    const groups = { A: [], B: [] };
+    (rows || []).forEach(r => {
+        const opt = (r.selectedOption || r.SelectedOption || '-').toUpperCase();
+        const team = (r.teamName || r.TeamName || '').trim();
+        const mul = r.multiplier || r.Multiplier || 1;
+        if (!team) return;
+        if (opt === 'A' || opt === 'B') groups[opt].push({ team, mul });
+    });
+
+    const countA = groups.A.length, countB = groups.B.length;
+    if (titleEl) titleEl.textContent = `回答一覧（A: ${countA}チーム / B: ${countB}チーム）`;
+    if (questionEl) questionEl.textContent = qTitle?.textContent || `問題${index + 1}`;
+
+    let html = '';
+    ['A', 'B'].forEach(opt => {
+        const list = groups[opt];
+        html += `
+            <div style="margin-bottom:20px;padding:16px;background:#f9fafb;border-radius:8px;">
+                <div style="font-size:18px;font-weight:700;color:#111;margin-bottom:12px;">
+                    選択肢 ${opt} <span style="font-weight:400;color:#666;">(${list.length}件)</span>
+                </div>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                    ${list.map(x => `
+                        <div style="padding:8px 12px;background:#fff;border:1px solid #e5e7eb;border-radius:6px;">
+                            <span style="font-weight:600;">${x.team}</span>
+                            <span style="color:#666;margin-left:8px;">×${x.mul}</span>
+                        </div>`).join('') || `<div style="color:#999;">回答なし</div>`}
+                </div>
+            </div>`;
+    });
+
+    contentEl.innerHTML = html;
+    modal.style.display = 'block';
+});
+
+connection.on('ClosePerQuestionResults', () => {
+    const modal = $('answer-list-modal');
+    if (modal) modal.style.display = 'none';
+});
+
+/* ===== 最終結果モーダル ===== */
+connection.on('GameResults', (results) => {
+    const modal = $('final-results-modal');
+    const content = $('final-results-content');
+    if (!modal || !content) return;
+
+    if (!results || results.length === 0) {
+        content.innerHTML = '<p style="color:#999;">結果がありません</p>';
+        modal.style.display = 'block';
+        return;
+    }
+
+    let html = '<table style="width:100%;border-collapse:collapse;"><tr style="background:#f3f4f6;"><th style="padding:12px;text-align:left;">順位</th><th style="padding:12px;text-align:left;">チーム名</th><th style="padding:12px;text-align:right;">合計点数</th><th style="padding:12px;text-align:right;">合計時間(秒)</th></tr>';
+    results.forEach((r, i) => {
+        const rank = i + 1;
+        const badge = rank === 1 ? ' 🏆' : (rank === 2 ? ' 🥈' : (rank === 3 ? ' 🥉' : ''));
+        const team = (r.teamName || r.TeamName || '').trim();
+        if (!team) return;
+        const time = (r.totalTime || r.TotalTime || 0).toFixed(1);
+        const points = r.totalPoints || r.TotalPoints || 0;
+        html += `<tr style="border-bottom:1px solid #e5e7eb;"><td style="padding:12px;">${rank}${badge}</td><td style="padding:12px;">${team}</td><td style="padding:12px;text-align:right;">${points}点</td><td style="padding:12px;text-align:right;">${time}</td></tr>`;
+    });
+    html += '</table>';
+    content.innerHTML = html;
+    modal.style.display = 'block';
+});
+
+/* モーダル閉じるボタン */
+const closeAnswerListBtn = $('close-answer-list');
+if (closeAnswerListBtn) {
+    closeAnswerListBtn.onclick = () => {
+        const modal = $('answer-list-modal');
+        if (modal) modal.style.display = 'none';
+    };
+}
+
+const closeFinalResultsBtn = $('close-final-results');
+if (closeFinalResultsBtn) {
+    closeFinalResultsBtn.onclick = () => {
+        const modal = $('final-results-modal');
+        if (modal) modal.style.display = 'none';
+    };
+}
+
 /* 接続開始 */
 (async () => {
     try {

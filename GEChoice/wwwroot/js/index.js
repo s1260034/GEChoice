@@ -161,9 +161,6 @@ conn.on("StateUpdated", s => {
     // 画面更新
     render(s);
 
-    // サーバ最新状態を再取得（既存仕様踏襲）
-    conn.invoke("GetState");
-
     // ボタン表示制御
     refreshAnswerBtn();
 });
@@ -355,22 +352,62 @@ function displayClientStatus(clientVotes) {
         clientStatusDiv.innerHTML = '<p class="muted">まだ回答がありません</p>';
         return;
     }
-    let html = '<table><tr><th>チーム名</th><th>選択</th><th>倍率</th><th>回答時間(秒)</th><th>操作</th></tr>';
+
+    // テーブルを動的に作成
+    const table = document.createElement('table');
+    const headerRow = document.createElement('tr');
+    headerRow.innerHTML = '<th>チーム名</th><th>選択</th><th>倍率</th><th>回答時間(秒)</th><th>操作</th>';
+    table.appendChild(headerRow);
+
     for (const k of keys) {
         const d = clientVotes[k] || {};
         const team = (d.teamName || d.TeamName || '').trim() || k;
         const mul = d.multiplier || d.Multiplier || 1;
         const opt = d.selectedOption || d.SelectedOption || '-';
         const tm = (d.responseTime || d.ResponseTime || 0).toFixed(1);
-        html += `<tr>
-      <td>${team}</td><td>${opt}</td>
-      <td><span class="multiplier-badge multiplier-${mul}">×${mul}</span></td>
-      <td>${tm}</td>
-      <td><button class="delete-btn" onclick="deleteVoteByTeam('${team.replace(/'/g, "\\'")}')">削除</button></td>
-    </tr>`;
+
+        const tr = document.createElement('tr');
+
+        // チーム名
+        const tdTeam = document.createElement('td');
+        tdTeam.textContent = team;
+        tr.appendChild(tdTeam);
+
+        // 選択
+        const tdOpt = document.createElement('td');
+        tdOpt.textContent = opt;
+        tr.appendChild(tdOpt);
+
+        // 倍率
+        const tdMul = document.createElement('td');
+        const span = document.createElement('span');
+        span.className = `multiplier-badge multiplier-${mul}`;
+        span.textContent = `×${mul}`;
+        tdMul.appendChild(span);
+        tr.appendChild(tdMul);
+
+        // 回答時間
+        const tdTime = document.createElement('td');
+        tdTime.textContent = tm;
+        tr.appendChild(tdTime);
+
+        // 削除ボタン
+        const tdBtn = document.createElement('td');
+        const btn = document.createElement('button');
+        btn.className = 'delete-btn';
+        btn.textContent = '削除';
+        btn.addEventListener('click', () => {
+            console.log('[CLIENT DELETE] Button clicked for team:', team);
+            deleteVoteByTeam(team);
+        });
+        tdBtn.appendChild(btn);
+        tr.appendChild(tdBtn);
+
+        table.appendChild(tr);
     }
-    html += '</table>';
-    clientStatusDiv.innerHTML = html;
+
+    clientStatusDiv.innerHTML = '';
+    clientStatusDiv.appendChild(table);
 }
 
 function displayParticipants(list) {
@@ -545,9 +582,18 @@ if (closeAnswerListBtn) {
 // 回答削除（グローバル公開）
 // =======================
 function deleteVoteByTeam(teamName) {
-    if (!teamName) return;
+    console.log('[CLIENT DELETE] Called with teamName:', teamName);
+    if (!teamName) {
+        console.log('[CLIENT DELETE] teamName is empty, returning');
+        return;
+    }
     if (confirm(`「${teamName}」の回答を削除しますか？`)) {
-        conn.invoke("DeleteTeamVote", teamName);
+        console.log('[CLIENT DELETE] Invoking DeleteTeamVote on server');
+        conn.invoke("DeleteTeamVote", teamName)
+            .then(() => console.log('[CLIENT DELETE] Success'))
+            .catch(err => console.error('[CLIENT DELETE] Error:', err));
+    } else {
+        console.log('[CLIENT DELETE] User cancelled');
     }
 }
 window.deleteVoteByTeam = deleteVoteByTeam;
