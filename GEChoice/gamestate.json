@@ -1,17 +1,72 @@
 {
-  "CurrentIndex": 0,
-  "IsVotingOpen": true,
-  "VotingStartUtc": "2025-09-30T08:24:31.3222597Z",
-  "ClientVotes": {},
-  "QuestionResults": {},
-  "UsedMultipliers": {},
-  "AggregateTotals": {},
-  "ResultsShown": {},
-  "TeamNames": {
-    "6dXaCiqHJQM3HDUMlw-JGw": "\u3042\u3042"
+  "CurrentIndex": 2,
+  "IsVotingOpen": false,
+  "VotingStartUtc": "2025-10-01T07:12:31.9214455Z",
+  "ClientVotes": {
+    "6JojipOAH49kiWrW0rY6Iw": {
+      "ClientId": "6JojipOAH49kiWrW0rY6Iw",
+      "TeamName": "\u30C1\u30FC\u30E01",
+      "SelectedOption": "B",
+      "Multiplier": 2,
+      "ResponseTime": 2.6130036
+    }
   },
-  "Answers": {},
+  "QuestionResults": {
+    "0": [
+      {
+        "ClientId": "6JojipOAH49kiWrW0rY6Iw",
+        "TeamName": "\u30C1\u30FC\u30E01",
+        "SelectedOption": "B",
+        "Multiplier": 4,
+        "ResponseTime": 2.1507284,
+        "Points": 0
+      }
+    ],
+    "1": [
+      {
+        "ClientId": "6JojipOAH49kiWrW0rY6Iw",
+        "TeamName": "\u30C1\u30FC\u30E01",
+        "SelectedOption": "A",
+        "Multiplier": 1,
+        "ResponseTime": 2.5825903,
+        "Points": 1
+      }
+    ],
+    "2": [
+      {
+        "ClientId": "6JojipOAH49kiWrW0rY6Iw",
+        "TeamName": "\u30C1\u30FC\u30E01",
+        "SelectedOption": "B",
+        "Multiplier": 2,
+        "ResponseTime": 2.6130036,
+        "Points": 2
+      }
+    ]
+  },
+  "UsedMultipliers": {
+    "\u30C1\u30FC\u30E01": [
+      4,
+      1,
+      2
+    ]
+  },
+  "AggregateTotals": {
+    "\u30C1\u30FC\u30E01": {}
+  },
+  "ResultsShown": {
+    "0": true,
+    "1": true,
+    "2": true
+  },
+  "TeamNames": {
+    "6JojipOAH49kiWrW0rY6Iw": "\u30C1\u30FC\u30E01"
+  },
+  "Answers": {
+    "6JojipOAH49kiWrW0rY6Iw": "B"
+  },
   "QuestionStarted": {
-    "0": true
+    "0": true,
+    "1": true,
+    "2": true
   }
 }
