@@ -364,14 +364,19 @@ namespace GEChoice.Hubs
         // 回答状況「削除」ボタン処理
         public async Task DeleteTeamVote(string teamName)
         {
+            Console.WriteLine($"[DELETE] Called with teamName: '{teamName}'");
             if (!IsHost()) { await Clients.Caller.SendAsync("ShowAlert", "権限がありません"); return; }
             if (string.IsNullOrWhiteSpace(teamName)) return;
             var team = NormalizeTeam(teamName);
+            Console.WriteLine($"[DELETE] Normalized team: '{team}'");
+            Console.WriteLine($"[DELETE] _clientVotes count: {_clientVotes.Count}");
 
             var toRemove = _clientVotes
                 .Where(kv => string.Equals(NormalizeTeam(kv.Value.TeamName), team, StringComparison.Ordinal))
                 .Select(kv => (id: kv.Key, mult: kv.Value.Multiplier))
                 .ToList();
+
+            Console.WriteLine($"[DELETE] Found {toRemove.Count} votes to remove");
 
             foreach (var (id, mult) in toRemove)
             {
