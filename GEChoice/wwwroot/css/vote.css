@@ -1,6 +1,4 @@
-﻿/* /mnt/data/vote.css — 完全版（白固定／右ドット） */
-
-/* === tokens ========================================================= */
+﻿/* === 全体共通 ========================================================= */
 :root {
     --bd: #e5e7eb;
     --txt: #222;
@@ -10,7 +8,7 @@
     --red: #ef4444;
 }
 
-/* === base =========================================================== */
+/* === ベース =========================================================== */
 * {
     box-sizing: border-box;
     -webkit-tap-highlight-color: transparent
@@ -22,12 +20,12 @@ html, body {
 
 body {
     margin: 0;
-    background: #fff !important; /* 白固定 */
+    background: #fff !important;
     color: var(--txt);
     font-family: Inter, system-ui, sans-serif;
 }
 
-/* === header ========================================================= */
+/* === ヘッダー ========================================================= */
 header {
     position: sticky;
     top: 0;
@@ -37,7 +35,7 @@ header {
     align-items: center;
     padding: 14px 18px;
     border-bottom: 1px solid var(--bd);
-    background: #fff !important; /* 白固定 */
+    background: #fff !important;
 }
 
     header .title {
@@ -45,7 +43,7 @@ header {
         margin-left: 4px
     }
 
-/* === main/card ====================================================== */
+/* === メイン ====================================================== */
 main {
     padding: 16px;
     display: flex;
@@ -54,14 +52,14 @@ main {
 }
 
 .card {
-    background: #fff !important; /* 白固定 */
+    background: #fff !important;
     border: 1px solid var(--bd);
     border-radius: 14px;
     box-shadow: 0 6px 18px rgba(0,0,0,.06);
     padding: 16px;
 }
 
-/* === multipliers ==================================================== */
+/* === 点数ボタン ==================================================== */
 .multiplier-section {
     margin-bottom: 16px
 }
@@ -114,7 +112,7 @@ main {
         color: #9ca3af
     }
 
-/* === choices ======================================================== */
+/* === 選択した回答 ======================================================== */
 .choices {
     display: grid;
     gap: 12px;
@@ -162,7 +160,7 @@ main {
         font-weight: 700;
     }
 
-/* === message ======================================================== */
+/* === メッセージ ======================================================== */
 #msg {
     color: #555;
     font-size: 13px;
@@ -173,7 +171,7 @@ main {
     text-align: center;
 }
 
-/* === status chips =================================================== */
+/* === ステータス（共通） =================================================== */
 .status,
 .online-status {
     padding: 8px 12px;
@@ -186,7 +184,7 @@ main {
     color: #374151;
 }
 
-/* generic status */
+/* ステータス */
 .status {
     display: flex;
     justify-content: center;
@@ -195,22 +193,21 @@ main {
     font-size: 13px;
 }
 
-/* === online-status (配置維持・右ドット) ============================= */
+/* === オンラインステータス ============================= */
 .online-status {
-    display: flex; /* block→flex（幅/中央はそのまま） */
+    display: flex;
     justify-content: center;
     align-items: center;
     gap: 10px;
     width: 150px;
     margin: 8px auto 0;
     text-align: center;
-    background-color: #fff !important; /* 白固定 */
-    border: 1px solid #ccc; /* 既存の枠色維持 */
-    border-radius: 15px; /* 既存の角丸維持 */
-    flex-direction: row; /* 明示 */
+    background-color: #fff !important;
+    border: 1px solid #ccc;
+    border-radius: 15px;
+    flex-direction: row;
 }
 
-    /* テキスト→ドットの順に固定（DOMを変えない） */
     .online-status .dot {
         order: 1;
         margin-left: 2px
