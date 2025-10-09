@@ -77,12 +77,26 @@ if (editTeamBtn) editTeamBtn.onclick = () => {
 };
 if (!getTeam()) openTeamModal('');
 
+/* ===== UID ===== */
+const UID_KEY = 'gec_uid';
+ function getStableUid() {
+    let uid = localStorage.getItem(UID_KEY);
+    if (!uid) {
+            uid = (crypto?.randomUUID?.() || ('uid-' + Math.random().toString(36).slice(2) + Date.now().toString(36)));
+            localStorage.setItem(UID_KEY, uid);
+        }
+    return uid;
+}
+const MY_UID = getStableUid();
+
+
 /* ===== SignalR ===== */
 const connection = new signalR.HubConnectionBuilder()
-    .withUrl('/hub/vote')
+    .withUrl(`/hub/vote?uid=${encodeURIComponent(MY_UID)}`)
     .withAutomaticReconnect()
     .build();
 const invoke = async (m, ...args) => { try { await connection.invoke(m, ...args); } catch (e) { console.error(m, e); } };
+
 
 /* ===== タイマー（2:00 & 残り30秒で警告） ===== */
 const DURATION_MS = 2 * 60 * 1000;
@@ -254,7 +268,7 @@ connection.onreconnected(async () => {
     const t = getTeam();
     if (t) { invoke('UpdateTeamName', t); }
 });
-connection.onclose(() => setConn(false, '切断'));
+connection.onclose(() => setConn(false, 'オフライン'));
 
 /* 正史：BuildState に合わせる（question.title / options[].label or ["A","B"] / usedMultipliersByTeam / currentIndex / isVotingOpen / votingStartTime） */
 connection.on('StateUpdated', async (state) => {
@@ -267,14 +281,16 @@ connection.on('StateUpdated', async (state) => {
 
         // 問切替検知：回答ロックの解除（次の問題へ）
         const newIndex = Number(state?.currentIndex || 0);
+
         if (newIndex !== currentQuestionIndex) {
             currentQuestionIndex = newIndex;
             hasVotedThisRound = false;
             currentSelectedOption = null;
             selectedMultiplier = 0;
-            // ボタンの選択見た目をクリア
             document.querySelectorAll('.choice').forEach(b => b.classList.remove('selected-answer'));
             multipliersEl?.querySelectorAll('.multiplier-btn').forEach(b => b.classList.remove('selected'));
+        } else {
+
         }
 
         // 選択肢（"['A','B']" または "[{label:'A'},{label:'B'}]" の両対応）
@@ -300,6 +316,12 @@ connection.on('StateUpdated', async (state) => {
             : [];
         const used = new Set(Array.isArray(usedList) ? usedList : []);
         applyUsedMultipliers(used);
+
+        if (state?.myVote && typeof state.myVote.multiplier === 'number') {
+            hasVotedThisRound = true;
+            currentSelectedOption = state.myVote.selectedOption || null;
+            lockAfterVote(Number(state.myVote.multiplier), currentSelectedOption || undefined);
+        }
 
         // ラウンド中ロックの最終調整
         updateVoteButtons();
@@ -338,7 +360,8 @@ connection.on('MultiplierUsed', (multiplier) => {
 /* （任意）ホストが回答を取り消した時の復帰 */
 connection.on('VoteDeleted', (clientId, deletedMultiplier) => {
     const myId = connection.connectionId;
-    if (!myId || clientId !== myId) return;
+    const myUid = localStorage.getItem('gec_uid');
+    if (clientId !== myId && clientId !== myUid) return;
 
     // このラウンドのロック解除（使用済みは BuildState の usedMultipliersByTeam に従う）
     hasVotedThisRound = false;
@@ -369,47 +392,100 @@ connection.on('QuestionChanged', (title, options) => {
 
 /* ===== 回答一覧モーダル ===== */
 connection.on('ShowPerQuestionResults', (index, rows) => {
+    const $ = (id) => document.getElementById(id);
     const modal = $('answer-list-modal');
     const titleEl = $('answer-list-title');
     const questionEl = $('answer-list-question');
     const contentEl = $('answer-list-content');
-
     if (!modal || !contentEl) return;
 
+    // --- helpers ---
+    const esc = (s) =>
+        String(s ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+
+    const norm = (s) => String(s ?? '').trim().normalize('NFKC');
+    const myTeam = norm(localStorage.getItem('gec_team_name') || '');
+
+    // rows を選択肢ごとにグルーピング
     const groups = { A: [], B: [] };
-    (rows || []).forEach(r => {
-        const opt = (r.selectedOption || r.SelectedOption || '-').toUpperCase();
-        const team = (r.teamName || r.TeamName || '').trim();
-        const mul = r.multiplier || r.Multiplier || 1;
+    (Array.isArray(rows) ? rows : []).forEach((r) => {
+        const opt = String(r?.selectedOption ?? r?.SelectedOption ?? '-').trim().toUpperCase();
+        const team = norm(r?.teamName ?? r?.TeamName ?? '');
+        const mul = Number(r?.multiplier ?? r?.Multiplier ?? 1) || 1;
         if (!team) return;
         if (opt === 'A' || opt === 'B') groups[opt].push({ team, mul });
     });
 
-    const countA = groups.A.length, countB = groups.B.length;
+    const countA = groups.A.length;
+    const countB = groups.B.length;
     if (titleEl) titleEl.textContent = `回答一覧（A: ${countA}チーム / B: ${countB}チーム）`;
-    if (questionEl) questionEl.textContent = qTitle?.textContent || `問題${index + 1}`;
 
-    let html = '';
-    ['A', 'B'].forEach(opt => {
+    // 画面上の問題タイトルを拾えなければフォールバック
+    const questionText =
+        (typeof qTitle !== 'undefined' && qTitle?.textContent?.trim()) ||
+        document.querySelector('#question-title')?.textContent?.trim() ||
+        `問題${(Number.isFinite(index) ? index : 0) + 1}`;
+    if (questionEl) questionEl.textContent = questionText;
+
+    // パネルHTML生成
+    const buildPanel = (opt) => {
         const list = groups[opt];
-        html += `
+        const chips =
+            list
+                .map((x) => {
+                    const isMine = myTeam && norm(x.team) === myTeam; // why: 全角/半角・空白ゆらぎ統一
+                    const baseStyle = `
+                        padding:8px 12px;
+                        border:1px solid #e5e7eb;
+                        border-radius:6px;
+                        background:#fff;
+                        font-weight:600;`.trim();
+                    const cls = isMine ? 'my-team' : '';
+                    return `
+                        <div class="${cls}" style="${baseStyle}">
+                            <span>${esc(x.team)}</span>
+                            <span style="margin-left:8px;">×${esc(x.mul)}</span>
+                        </div>`;
+                })
+                .join('') || `<div style="color:#999;">回答なし</div>`;
+
+        return `
             <div style="margin-bottom:20px;padding:16px;background:#f9fafb;border-radius:8px;">
                 <div style="font-size:18px;font-weight:700;color:#111;margin-bottom:12px;">
                     選択肢 ${opt} <span style="font-weight:400;color:#666;">(${list.length}件)</span>
                 </div>
-                <div style="display:flex;flex-wrap:wrap;gap:8px;">
-                    ${list.map(x => `
-                        <div style="padding:8px 12px;background:#fff;border:1px solid #e5e7eb;border-radius:6px;">
-                            <span style="font-weight:600;">${x.team}</span>
-                            <span style="color:#666;margin-left:8px;">×${x.mul}</span>
-                        </div>`).join('') || `<div style="color:#999;">回答なし</div>`}
-                </div>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;">${chips}</div>
             </div>`;
-    });
+    };
 
-    contentEl.innerHTML = html;
+    contentEl.innerHTML = buildPanel('A') + buildPanel('B');
+
+    // 表示
     modal.style.display = 'block';
 });
+
+// CSSは未注入時のみ追加
+(function ensureMyTeamStyle() {
+    if (document.getElementById('my-team-style')) return;
+    const css = `
+        .my-team{
+            background:#fff8e1 !important;
+            border-color:#f59e0b !important;
+            box-shadow:0 0 0 2px rgba(245,158,11,.25);
+        }
+        .my-team span:first-child{ font-weight:800; }
+    `;
+    const s = document.createElement('style');
+    s.id = 'my-team-style';
+    s.textContent = css;
+    document.head.appendChild(s);
+})();
+
 
 connection.on('ClosePerQuestionResults', () => {
     const modal = $('answer-list-modal');
@@ -459,6 +535,40 @@ if (closeFinalResultsBtn) {
         if (modal) modal.style.display = 'none';
     };
 }
+
+connection.on('GameReset', () => {
+    // ラウンド内のロックや選択状態を全面解除
+    hasVotedThisRound = false;
+    currentSelectedOption = null;
+    selectedMultiplier = 0;
+
+    // A/B ボタンを再有効化 & 見た目リセット
+    document.querySelectorAll('.choice').forEach(b => {
+        b.disabled = false;
+        b.classList.remove('selected-answer');
+    });
+
+    // 倍率ボタンも初期化（使用済みは後続の StateUpdated で反映される）
+    multipliersEl?.querySelectorAll('.multiplier-btn').forEach(b => {
+        b.disabled = false;
+        b.classList.remove('used', 'selected');
+        b.style.pointerEvents = '';
+        b.style.opacity = '';
+    });
+
+    // 画面表示用メッセージ
+    text(msgEl, 'リセットされました。チーム名を確認して点数を選択し、回答できます');
+
+    // サーバ状態を取り直してUIを最新化（使用済み倍率・タイマー等）
+    invoke('GetState');
+
+    // Uid→Team がサーバ側でクリアされているため、チーム名を再送（ローカルは保持済）
+    const t = getTeam();
+    if (t) invoke('UpdateTeamName', t);
+
+    // 最終的な活性化判定を再評価
+    updateVoteButtons();
+});
 
 /* 接続開始 */
 (async () => {

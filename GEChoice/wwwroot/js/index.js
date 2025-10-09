@@ -1,11 +1,20 @@
 // =======================
 // SignalR 接続の初期化
 // =======================
+function getStableUid() {
+    let uid = localStorage.getItem('gec_uid');
+    if (!uid) {
+        uid = (crypto?.randomUUID?.() || ('uid-' + Math.random().toString(36).slice(2) + Date.now().toString(36)));
+        localStorage.setItem('gec_uid', uid);
+    }
+    return uid;
+}
+const HOST_UID = getStableUid();
+
 // const conn=new signalR.HubConnectionBuilder().withUrl("/hub/vote",{transport:signalR.HttpTransportType.LongPolling}).withAutomaticReconnect().build();
 const conn = new signalR.HubConnectionBuilder()
-    .withUrl("/hub/vote", {
-        transport: signalR.HttpTransportType.WebSockets,
-    })
+    .withUrl(`/hub/vote?uid=${encodeURIComponent(HOST_UID)}`,
+        { transport: signalR.HttpTransportType.WebSockets })
     .withAutomaticReconnect()
     .build();
 
@@ -158,6 +167,36 @@ conn.on("StateUpdated", s => {
     hasSnapshotForThisQuestion = !!(s.isQuestionFinalized || questionResults[s.currentIndex || 0]);
     isQuestionStartedFlag = !!s.isQuestionStarted;
 
+    try {
+        const rmap = s?.resultsByIndex || {};
+        const key = String(s?.currentIndex ?? 0);
+        const my = rmap[key];
+        const newIndex = Number(state?.currentIndex || 0);
+
+        if (newIndex !== currentQuestionIndex && !hasVotedThisRound) {
+            currentQuestionIndex = newIndex;
+            hasVotedThisRound = false;
+            currentSelectedOption = null;
+            selectedMultiplier = 0;
+            document.querySelectorAll('.choice').forEach(b => b.classList.remove('selected-answer'));
+            multipliersEl?.querySelectorAll('.multiplier-btn').forEach(b => b.classList.remove('selected'));
+        }
+
+        if (my && typeof my === 'object') {
+            renderResultForCurrentQuestion({
+                counts: my.counts || { A: 0, B: 0 },
+                winner: my.winner || null,
+                voters: my.voters || 0,
+                finalizedAtUtc: my.finalizedAtUtc || null
+            });
+        } else {
+            // 未確定なら、途中結果を描画する／空表示にする等、既存ロジックへ
+            renderIntermediateCounts(s?.counts || { A: 0, B: 0 });
+        }
+    } catch (e) {
+    console.warn('result render error', e);
+    }
+
     // 画面更新
     render(s);
 
@@ -165,9 +204,51 @@ conn.on("StateUpdated", s => {
     refreshAnswerBtn();
 });
 
+conn.on("GameReset", () => {
+    try {
+        stopTimer && stopTimer();
+
+        // 画面側のキャッシュ類を完全初期化
+        questionResults = {};          // 問題別結果のキャッシュ
+        hasSnapshotForThisQuestion = false;
+        isQuestionStartedFlag = false;
+
+        // モーダル等を閉じる
+        const modal = document.getElementById('answer-list-modal');
+        if (modal) modal.style.display = 'none';
+
+        // UI を初期化（空で描画してから、直後に来る StateUpdated/ParticipantsUpdated を受けて再描画）
+        displayParticipants([]);
+        render({
+            currentIndex: 0,
+            totalQuestions: (currentState?.totalQuestions) || 1,
+            question: null,
+            counts: { A: 0, B: 0 },
+            isVotingOpen: false,
+            isQuestionStarted: false,
+            isQuestionFinalized: false,
+            usedMultipliersByTeam: {},
+            resultsByIndex: {}
+        });
+        refreshAnswerBtn();
+    } catch (e) {
+        console.warn('GameReset handler error', e);
+    }
+});
+
 conn.on("ParticipantsUpdated", list => {
-    participantsLatest = list || [];
-    displayParticipants(participantsLatest);
+    //participantsLatest = list || [];
+    //displayParticipants(participantsLatest);
+
+    if (Array.isArray(list) && list.length > 0) {
+        participantsLatest = list;
+        displayParticipants(participantsLatest);
+    } else if (Array.isArray(list) && list.length === 0) {
+        // クリアしたい意図の明確な空ブロードキャスト以外は、無視する運用にするなら↓コメントアウト
+        // participantsLatest = [];
+        // displayParticipants(participantsLatest);
+        // ここでは何もしない（前回表示をキープ）
+    }
 });
 
 conn.on("VotingStatusChanged", isOpen => {
@@ -409,6 +490,8 @@ function displayClientStatus(clientVotes) {
     clientStatusDiv.innerHTML = '';
     clientStatusDiv.appendChild(table);
 }
+
+
 
 function displayParticipants(list) {
     if (!list || list.length === 0) {
