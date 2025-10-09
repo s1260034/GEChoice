@@ -1,12 +1,16 @@
-﻿:root {
+﻿/* /mnt/data/vote.css — 完全版（白固定／右ドット） */
+
+/* === tokens ========================================================= */
+:root {
     --bd: #e5e7eb;
     --txt: #222;
     --muted: #666;
     --g1: #22c55e;
     --g2: #16a34a;
-    --red: #ef4444
+    --red: #ef4444;
 }
 
+/* === base =========================================================== */
 * {
     box-sizing: border-box;
     -webkit-tap-highlight-color: transparent
@@ -18,11 +22,12 @@ html, body {
 
 body {
     margin: 0;
-    background: #fff;
+    background: #fff !important; /* 白固定 */
     color: var(--txt);
-    font-family: Inter,system-ui,sans-serif
+    font-family: Inter, system-ui, sans-serif;
 }
 
+/* === header ========================================================= */
 header {
     position: sticky;
     top: 0;
@@ -32,7 +37,7 @@ header {
     align-items: center;
     padding: 14px 18px;
     border-bottom: 1px solid var(--bd);
-    background: #fff
+    background: #fff !important; /* 白固定 */
 }
 
     header .title {
@@ -40,6 +45,7 @@ header {
         margin-left: 4px
     }
 
+/* === main/card ====================================================== */
 main {
     padding: 16px;
     display: flex;
@@ -48,13 +54,14 @@ main {
 }
 
 .card {
-    background: #fff;
+    background: #fff !important; /* 白固定 */
     border: 1px solid var(--bd);
     border-radius: 14px;
     box-shadow: 0 6px 18px rgba(0,0,0,.06);
-    padding: 16px
+    padding: 16px;
 }
 
+/* === multipliers ==================================================== */
 .multiplier-section {
     margin-bottom: 16px
 }
@@ -81,7 +88,7 @@ main {
     cursor: pointer;
     background: #fff;
     transition: all .15s;
-    position: relative
+    position: relative;
 }
 
     .multiplier-btn:hover:not(:disabled) {
@@ -107,10 +114,11 @@ main {
         color: #9ca3af
     }
 
+/* === choices ======================================================== */
 .choices {
     display: grid;
     gap: 12px;
-    grid-template-columns: repeat(auto-fit,minmax(140px,1fr))
+    grid-template-columns: repeat(auto-fit, minmax(140px,1fr))
 }
 
 .choice {
@@ -124,7 +132,7 @@ main {
     background: linear-gradient(90deg,var(--g1),var(--g2));
     color: #fff;
     box-shadow: 0 6px 16px rgba(34,197,94,.3);
-    transition: transform .08s
+    transition: transform .08s;
 }
 
     .choice:active {
@@ -151,9 +159,10 @@ main {
         padding: 2px 8px;
         border-radius: 12px;
         font-size: 12px;
-        font-weight: 700
+        font-weight: 700;
     }
 
+/* === message ======================================================== */
 #msg {
     color: #555;
     font-size: 13px;
@@ -161,36 +170,136 @@ main {
     padding: 8px;
     background: #f9fafb;
     border-radius: 8px;
-    text-align: center
+    text-align: center;
 }
 
+/* === status chips =================================================== */
+.status,
+.online-status {
+    padding: 8px 12px;
+    border-radius: 999px;
+    background: linear-gradient(#ffffff,#ffffff) padding-box, linear-gradient(135deg, #e8eef5, #f4f7fb) border-box;
+    border: 1px solid transparent;
+    box-shadow: 0 6px 16px rgba(0,0,0,.06);
+    letter-spacing: .01em;
+    font-weight: 700;
+    color: #374151;
+}
+
+/* generic status */
 .status {
     display: flex;
     justify-content: center;
     align-items: center;
     gap: 8px;
-    padding: 10px;
-    border: 1px solid var(--bd);
-    border-radius: 10px;
     font-size: 13px;
-    color: #666
 }
 
+/* === online-status (配置維持・右ドット) ============================= */
+.online-status {
+    display: flex; /* block→flex（幅/中央はそのまま） */
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    width: 150px;
+    margin: 8px auto 0;
+    text-align: center;
+    background-color: #fff !important; /* 白固定 */
+    border: 1px solid #ccc; /* 既存の枠色維持 */
+    border-radius: 15px; /* 既存の角丸維持 */
+    flex-direction: row; /* 明示 */
+}
+
+    /* テキスト→ドットの順に固定（DOMを変えない） */
+    .online-status .dot {
+        order: 1;
+        margin-left: 2px
+    }
+
+    .online-status > :not(.dot) {
+        order: 1
+    }
+
+/* === ドット ============================================================ */
 .dot {
     width: 10px;
     height: 10px;
     border-radius: 50%;
-    background: #ccc
+    background: #ccc;
+    position: relative;
+    box-shadow: 0 0 0 2px rgba(0,0,0,.04) inset;
 }
 
 .ok {
-    background: #22c55e
+    background: var(--g1)
 }
 
 .ng {
-    background: #ef4444
+    background: var(--red)
 }
 
+/* OK: オンライン */
+@keyframes cc-pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(34,197,94,.45)
+    }
+
+    70% {
+        box-shadow: 0 0 0 10px rgba(34,197,94,0)
+    }
+
+    100% {
+        box-shadow: 0 0 0 0 rgba(34,197,94,0)
+    }
+}
+
+.dot.ok::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    animation: cc-pulse 1.8s ease-out infinite;
+}
+
+/* NG：　接続中 */
+@keyframes cc-ping {
+    0% {
+        transform: scale(1);
+        opacity: .9
+    }
+
+    60% {
+        transform: scale(1.6);
+        opacity: 0
+    }
+
+    100% {
+        transform: scale(1.6);
+        opacity: 0
+    }
+}
+
+.dot.ng::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 2px solid var(--red);
+    animation: cc-ping 1.2s ease-out infinite;
+}
+
+/* 動き抑制（アクセシビリティ） */
+@media (prefers-reduced-motion: reduce) {
+    .dot.ok::after, .dot.ng::after {
+        animation: none
+    }
+
+    .status:hover, .online-status:hover {
+        transform: none
+    }
+}
+
+/* === 投票確定モーダル =========================================================== */
 .voting-closed {
     text-align: center;
     padding: 32px;
@@ -213,18 +322,19 @@ main {
     padding: 16px;
     z-index: 9999;
 }
-.modal-backdrop.hide {
-    display: none;
-}
+
+    .modal-backdrop.hide {
+        display: none
+    }
 
 .modal {
     width: 100%;
     max-width: 420px;
-    background: #fff;
+    background: #fff !important;
     border: 1px solid var(--bd);
     border-radius: 14px;
     box-shadow: 0 20px 50px rgba(0,0,0,.18);
-    padding: 18px
+    padding: 18px;
 }
 
     .modal h3 {
@@ -277,7 +387,7 @@ main {
     top: 10px;
     display: flex;
     gap: 8px;
-    align-items: center
+    align-items: center;
 }
 
 .tag {
@@ -286,7 +396,7 @@ main {
     padding: 6px 10px;
     font-size: 12px;
     color: #333;
-    background: #f9fafb
+    background: #f9fafb;
 }
 
 .linkbtn {
@@ -309,16 +419,16 @@ main {
     align-items: center;
     justify-content: center;
     z-index: 1000;
-    padding: 16px
+    padding: 16px;
 }
 
 .confirm-box {
-    background: #fff;
+    background: #fff !important;
     border-radius: 16px;
     padding: 24px;
     max-width: 800px;
     width: 100%;
-    box-shadow: 0 20px 50px rgba(0,0,0,.25)
+    box-shadow: 0 20px 50px rgba(0,0,0,.25);
 }
 
 .confirm-title {
@@ -344,7 +454,7 @@ main {
     font-weight: 800;
     text-align: center;
     margin-bottom: 20px;
-    box-shadow: 0 8px 20px rgba(245,158,11,.3)
+    box-shadow: 0 8px 20px rgba(245,158,11,.3);
 }
 
 .confirm-choice-detail {
@@ -353,7 +463,7 @@ main {
     margin-bottom: 20px;
     padding: 12px;
     background: #f9fafb;
-    border-radius: 10px
+    border-radius: 10px;
 }
 
 .confirm-choice-item {
@@ -385,7 +495,7 @@ main {
     font-weight: 700;
     cursor: pointer;
     font-size: 16px;
-    transition: transform .1s
+    transition: transform .1s;
 }
 
     .confirm-btn:hover {
@@ -403,6 +513,7 @@ main {
     box-shadow: 0 4px 12px rgba(34,197,94,.3)
 }
 
+/* === 問題ペイン ===================================================== */
 .q-header {
     display: flex;
     align-items: center;
@@ -410,6 +521,7 @@ main {
     gap: 12px;
 }
 
+/* === カウントダウン ================================================= */
 .countdown {
     min-width: 96px;
     text-align: center;
@@ -423,7 +535,7 @@ main {
 
     .countdown.warning {
         border-color: var(--red);
-        color: var(--red);
+        color: var(--red)
     }
 
 .late-warning {
@@ -431,9 +543,23 @@ main {
     text-align: center;
     font-size: 14px;
     color: var(--red);
-    font-weight: 700;
+    font-weight: 700
 }
 
 .hide {
-    display: none;
-} 
+    display: none
+}
+
+/* === keep layout helpers =========================================== */
+.cover {
+    justify-content: center
+}
+
+/* === team highlight ================================================= */
+.my-team {
+    background: #fef3c7;
+    font-weight: 700;
+    border-left: 4px solid #f59e0b
+}
+
+/* NOTE: ダークモード向け CSS は削除（常に白） */

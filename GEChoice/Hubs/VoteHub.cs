@@ -1,8 +1,11 @@
-using System.Collections.Concurrent;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Configuration;
-using System.Text.Json;
+using System.Collections.Concurrent;
+using System.Diagnostics.Metrics;
 using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Text.Json;
 
 namespace GEChoice.Hubs
 {
@@ -46,11 +49,37 @@ namespace GEChoice.Hubs
         private static readonly ConcurrentDictionary<string, byte> _connections = new();    // 接続確認用（IDをセット、値はダミー）
         private static long _seqCounter = 0;
         private static readonly ConcurrentDictionary<string, long> _arrivalSeq = new();
+        private static readonly ConcurrentDictionary<string, string> ConnToUid = new();   // connId -> uid
+        private static readonly ConcurrentDictionary<string, string> UidToTeam = new();   // uid -> team
+        private static readonly ConcurrentDictionary<string, string> AnswersByUid = new(); // uid -> "A" / "B"
 
         // ----- ファイル永続化 -----
         private static readonly string _stateFilePath = Path.Combine(Directory.GetCurrentDirectory(), "gamestate.json");
         private static readonly SemaphoreSlim _fileSemaphore = new(1, 1);   // ファイル書き込みの排他制御
         private static bool _hasLoadedState = false;                        // 起動時の読み込みフラグ
+        private class StateDto
+        {
+            public int currentIndex { get; set; }
+            public int totalQuestions { get; set; }
+            public object? question { get; set; }
+            public Dictionary<string, int>? counts { get; set; }
+            public bool isVotingOpen { get; set; }
+            public DateTime? votingStartTime { get; set; }
+            public Dictionary<string, object>? clientVotes { get; set; }
+            public Dictionary<string, int[]>? usedMultipliersByTeam { get; set; }
+            public bool isQuestionFinalized { get; set; }
+            public bool isQuestionStarted { get; set; }
+            public Dictionary<string, object>? resultsByIndex { get; set; }
+        }
+        private class ResultDto
+        {
+            public int index { get; set; }
+            public DateTime finalizedAtUtc { get; set; }
+            public Dictionary<string, int> counts { get; set; } = new();  // A/Bの最終カウント
+            public string? winner { get; set; }  // "A" / "B" / "tie"
+            public int voters { get; set; }      // 回答者数（チーム数ベースなど、任意）
+        }
+        private static readonly ConcurrentDictionary<int, ResultDto> _resultsByIndex = new();
 
         // =====================
         // コンストラクタ
@@ -101,28 +130,55 @@ namespace GEChoice.Hubs
         }
 
         // VoteHubの実行サイクル
-        public override async Task OnConnectedAsync()
+        //public override async Task OnConnectedAsync()
+        //{
+        //    _connections[Context.ConnectionId] = 1;
+        //    _arrivalSeq[Context.ConnectionId] = Interlocked.Increment(ref _seqCounter); // ★
+
+        //    await Clients.Caller.SendAsync("StateUpdated", BuildState());
+        //    await BroadcastParticipants();
+        //    await base.OnConnectedAsync();
+        //}
+        public async override Task OnConnectedAsync()
         {
+            var http = Context.GetHttpContext();
+            var uid = http?.Request.Query["uid"].ToString();
+            if (string.IsNullOrWhiteSpace(uid)) uid = Context.ConnectionId;  // フォールバック
+
             _connections[Context.ConnectionId] = 1;
             _arrivalSeq[Context.ConnectionId] = Interlocked.Increment(ref _seqCounter); // ★
+            ConnToUid[Context.ConnectionId] = uid;
+
+            if (UidToTeam.TryGetValue(uid, out var knownTeam) && !string.IsNullOrWhiteSpace(knownTeam))
+            {
+                _teamNames[Context.ConnectionId] = knownTeam;
+            }
 
             await Clients.Caller.SendAsync("StateUpdated", BuildState());
-            await BroadcastParticipants();
+            //await BroadcastParticipants();
+            await Clients.Caller.SendAsync("ParticipantsUpdated", BuildParticipants());
             await base.OnConnectedAsync();
         }
 
         // 切断時の処理（個別回答の削除、状態と参加者一覧の更新）
         public override async Task OnDisconnectedAsync(Exception? exception)
         {
-            _answers.TryRemove(Context.ConnectionId, out _);
-            _clientVotes.TryRemove(Context.ConnectionId, out _);
-            _teamNames.TryRemove(Context.ConnectionId, out _);
+            //_answers.TryRemove(Context.ConnectionId, out _);
+            //_clientVotes.TryRemove(Context.ConnectionId, out _);
+            //_teamNames.TryRemove(Context.ConnectionId, out _);
             _connections.TryRemove(Context.ConnectionId, out _);
             _arrivalSeq.TryRemove(Context.ConnectionId, out _); // ★
+            ConnToUid.TryRemove(Context.ConnectionId, out _);
 
             await Clients.All.SendAsync("StateUpdated", BuildState());
             await BroadcastParticipants();
             await base.OnDisconnectedAsync(exception);
+        }
+
+        private string GetUid()
+        {
+            return ConnToUid.TryGetValue(Context.ConnectionId, out var uid)
+                ? uid : Context.ConnectionId; // フォールバック
         }
 
 
@@ -133,7 +189,30 @@ namespace GEChoice.Hubs
         // 共通
         // ---------------
         // 状態取得（初期描画、再接続時）
-        public Task GetState() => Clients.Caller.SendAsync("StateUpdated", BuildState());
+        public Task GetState()
+        {
+            var uid = GetUid();
+            StateDto state = BuildState();
+            var myVote = _clientVotes.TryGetValue(uid, out var v)
+                ? new { selectedOption = v.SelectedOption, multiplier = v.Multiplier }
+                : null;
+            var enriched = new
+            {
+                state.currentIndex,
+                state.totalQuestions,
+                state.question,
+                state.counts,
+                state.isVotingOpen,
+                state.votingStartTime,
+                state.clientVotes,
+                state.usedMultipliersByTeam,
+                state.isQuestionFinalized,
+                state.isQuestionStarted,
+                state.resultsByIndex,
+                myVote
+            };
+            return Clients.Caller.SendAsync("StateUpdated", enriched);
+        }
 
         // ---------------
         // 参加者ページ用
@@ -141,7 +220,10 @@ namespace GEChoice.Hubs
         // チーム名の登録／更新
         public async Task UpdateTeamName(string teamName)
         {
-            _teamNames[Context.ConnectionId] = (teamName ?? "").Trim();
+            //_teamNames[Context.ConnectionId] = (teamName ?? "").Trim();
+            var team = (teamName ?? "").Trim();
+            _teamNames[Context.ConnectionId] = team;   // 画面の「参加者一覧」用（接続表示）
+            UidToTeam[GetUid()] = team;                // 永続の主系
             await Clients.Caller.SendAsync("StateUpdated", BuildState());
             await BroadcastParticipants();
         }
@@ -170,6 +252,8 @@ namespace GEChoice.Hubs
                 return;
             }
             _teamNames[Context.ConnectionId] = team;
+            var uid = GetUid();
+            UidToTeam[uid] = team;
 
             var used = _usedMultipliers.GetOrAdd(team, _ => new HashSet<int>());
 
@@ -194,19 +278,65 @@ namespace GEChoice.Hubs
                 ? (DateTime.UtcNow - _votingStartUtc.Value).TotalSeconds
                 : 0d;
 
-            _answers[Context.ConnectionId] = label;
-            _clientVotes[Context.ConnectionId] = new ClientVote
-            {
-                ClientId = Context.ConnectionId,
-                TeamName = team,
-                SelectedOption = label,
-                Multiplier = multiplier,
-                ResponseTime = rt
+            _answers[uid] = label;
+            _clientVotes[uid] = new ClientVote { 
+                ClientId = uid, TeamName = team, 
+                SelectedOption = label, 
+                Multiplier = multiplier, 
+                ResponseTime = rt 
             };
 
-            await Clients.All.SendAsync("StateUpdated", BuildState());
+            await Clients.Caller.SendAsync("StateUpdated", BuildState());
             await Clients.All.SendAsync("ParticipantsUpdated", BuildParticipants());
             await Clients.Caller.SendAsync("MultiplierUsed", multiplier);
+        }
+
+        // 回答復元
+        public Task SubmitAnswer(string choice /* "A" or "B" */, int multiplier)
+        {
+            var uid = GetUid();
+
+            // 1) チーム取得
+            if (!UidToTeam.TryGetValue(uid, out var team) || string.IsNullOrWhiteSpace(team))
+                throw new HubException("チーム未設定です。");
+
+            // 2) チーム単位の倍率使用チェック（既存の _usedMultipliers を流用）
+            if (_usedMultipliers.TryGetValue(team, out var used) && used.Contains(multiplier))
+                throw new HubException("この点数は既に使用済みです。");
+
+            // 3) 回答を uid で保持（途中保存）
+            AnswersByUid[uid] = choice;
+
+            // 4) 必要であれば“未確定”として集計側のバッファに入れる（設計に合わせて）
+            // _clientVotes など ConnectionId ベースの辞書があれば uid ベースに変更
+
+            // 5) クライアントへOK返す/ブロードキャスト
+            return Task.CompletedTask;
+        }
+
+        // 回答確定処理
+        public Task ConfirmVote(int multiplier)
+        {
+            var uid = GetUid();
+
+            if (!UidToTeam.TryGetValue(uid, out var team) || string.IsNullOrWhiteSpace(team))
+                throw new HubException("チーム未設定です。");
+            if (!AnswersByUid.TryGetValue(uid, out var choice))
+                throw new HubException("回答が見つかりません。");
+
+            // 1) 倍率の最終消費（チーム単位）
+            var set = _usedMultipliers.GetOrAdd(team, _ => new HashSet<int>());
+            if (set.Contains(multiplier))
+                throw new HubException("この点数は既に使用済みです。");
+            set.Add(multiplier);
+
+            // 2) 確定投票として集計に反映（team や uid をキーにした本番集計へ）
+            //   例）_answers[uid] = new Answer{ Team=team, Choice=choice, Multiplier=multiplier };
+
+            // 3) ブロードキャスト（ホスト側の「回答状況」に残り続ける）
+            // await Clients.All.SendAsync("OnAnswerConfirmed", team, uid, choice, multiplier);
+
+            return Task.CompletedTask;
         }
 
         // ---------------
@@ -333,7 +463,10 @@ namespace GEChoice.Hubs
         {
             if (!IsHost()) { await Clients.Caller.SendAsync("ShowAlert", "権限がありません"); return; }
 
-            _answers.Clear();
+            //_answers.Clear();
+            //_clientVotes.Clear();
+            AnswersByUid.Clear();
+            UidToTeam.Clear();
             _clientVotes.Clear();
             _usedMultipliers.Clear();
             _questionStarted.Clear();
@@ -342,6 +475,7 @@ namespace GEChoice.Hubs
             _resultsShown.Clear();
             _isVotingOpen = false;
             _votingStartUtc = null;
+            _resultsByIndex.Clear();
 
             _teamNames.Clear();
 
@@ -349,6 +483,7 @@ namespace GEChoice.Hubs
             await Clients.All.SendAsync("GameReset");
             await BroadcastInterimTotals();
             await BroadcastParticipants();
+            await Task.CompletedTask;
 
             // ゲームリセット時はファイルも削除
             try
@@ -373,20 +508,20 @@ namespace GEChoice.Hubs
 
             var toRemove = _clientVotes
                 .Where(kv => string.Equals(NormalizeTeam(kv.Value.TeamName), team, StringComparison.Ordinal))
-                .Select(kv => (id: kv.Key, mult: kv.Value.Multiplier))
+                .Select(kv => (uid: kv.Key, mult: kv.Value.Multiplier))
                 .ToList();
 
             Console.WriteLine($"[DELETE] Found {toRemove.Count} votes to remove");
 
-            foreach (var (id, mult) in toRemove)
+            foreach (var (uid, mult) in toRemove)
             {
-                _clientVotes.TryRemove(id, out _);
-                _answers.TryRemove(id, out _);
+                _clientVotes.TryRemove(uid, out _);
+                _answers.TryRemove(uid, out _);
                 if (_usedMultipliers.TryGetValue(team, out var set) && (mult is 1 or 2 or 4))
                 {
                     lock (_lock) set.Remove(mult);
                 }
-                await Clients.All.SendAsync("VoteDeleted", id, mult);
+                await Clients.All.SendAsync("VoteDeleted", uid, mult);
             }
 
             // すでに確定済みなら、同設問スナップショットからも削除 & 途中経過から減算
@@ -481,24 +616,97 @@ namespace GEChoice.Hubs
             .ToList();
         }
 
+        // チーム名のセット
+        public Task SetTeamName(string team)
+        {
+            var uid = GetUid();
+            UidToTeam[uid] = team;
+            // （必要ならここで team ごとの現在状態を返す/ブロードキャスト）
+            return Task.CompletedTask;
+        }
+
         // ---------------
         // ブロードキャスト
         // ---------------
         // 回答確定処理（成否判別、結果一覧、途中経過、モーダル表示）
+        //private async Task FinalizeCurrentQuestionAsync(bool broadcastModal)
+        //{
+        //    await _finalizeSemaphore.WaitAsync();
+        //    try
+        //    {
+        //        if (!_isVotingOpen && _questionResults.ContainsKey(_currentIndex))
+        //        {
+        //            return; // 二重確定防止
+        //        }
+
+        //        _isVotingOpen = false;
+
+        //        var correct = (_questions.ElementAtOrDefault(_currentIndex)?.CorrectOption ?? "").ToUpperInvariant();
+
+        //        var snapshot = _clientVotes.Values
+        //            .Select(v =>
+        //            {
+        //                var isCorrect = !string.IsNullOrEmpty(correct)
+        //                                && string.Equals(v.SelectedOption, correct, StringComparison.OrdinalIgnoreCase);
+        //                return new QuestionResult
+        //                {
+        //                    ClientId = v.ClientId,
+        //                    TeamName = v.TeamName,
+        //                    SelectedOption = v.SelectedOption,
+        //                    Multiplier = v.Multiplier,
+        //                    ResponseTime = Math.Max(0, v.ResponseTime),     // 個別の回答時間（秒）
+        //                    Points = isCorrect ? v.Multiplier : 0
+        //                };
+        //            })
+        //            .ToList();
+
+        //        _questionResults[_currentIndex] = snapshot;
+
+        //        // 途中経過（ポイント加算・時間は合計。0点でも存在は反映）
+        //        foreach (var r in snapshot)
+        //        {
+        //            var key = (r.TeamName ?? "").Trim();
+        //            if (string.IsNullOrEmpty(key)) continue;
+
+        //            _aggregateTotals.AddOrUpdate(key,
+        //                _ => (r.Points, r.ResponseTime),
+        //                (_, cur) => (cur.Points + r.Points, cur.Time + r.ResponseTime));
+        //        }
+
+        //        await Clients.All.SendAsync("VotingStatusChanged", false);
+        //        await Clients.All.SendAsync("QuestionResults", _currentIndex, snapshot);
+        //        if (broadcastModal)
+        //        {
+        //            _resultsShown[_currentIndex] = true;
+        //            await Clients.All.SendAsync("ShowPerQuestionResults", _currentIndex, snapshot);
+        //        }
+        //        await BroadcastInterimTotals();
+        //        await SaveGameStateToFile();  // 回答確定時に保存
+        //    }
+        //    finally
+        //    {
+        //        _finalizeSemaphore.Release();
+        //    }
+        //}
         private async Task FinalizeCurrentQuestionAsync(bool broadcastModal)
         {
             await _finalizeSemaphore.WaitAsync();
             try
             {
+                // --- 二重確定の防止 ---
                 if (!_isVotingOpen && _questionResults.ContainsKey(_currentIndex))
                 {
-                    return; // 二重確定防止
+                    return;
                 }
 
+                // --- 投票を締める ---
                 _isVotingOpen = false;
 
-                var correct = (_questions.ElementAtOrDefault(_currentIndex)?.CorrectOption ?? "").ToUpperInvariant();
+                // 正答（無ければ空文字）
+                var correct = (_questions.ElementAtOrDefault(_currentIndex)?.CorrectOption ?? "")
+                                .ToUpperInvariant();
 
+                // 1) 今ラウンドの投票からスナップショットを作成（UID主語でOK）
                 var snapshot = _clientVotes.Values
                     .Select(v =>
                     {
@@ -510,25 +718,49 @@ namespace GEChoice.Hubs
                             TeamName = v.TeamName,
                             SelectedOption = v.SelectedOption,
                             Multiplier = v.Multiplier,
-                            ResponseTime = Math.Max(0, v.ResponseTime),     // 個別の回答時間（秒）
+                            ResponseTime = Math.Max(0, v.ResponseTime),
                             Points = isCorrect ? v.Multiplier : 0
                         };
                     })
                     .ToList();
 
+                // 2) 問題ごとの結果を保存（リロード復帰はこの保存が鍵）
                 _questionResults[_currentIndex] = snapshot;
 
-                // 途中経過（ポイント加算・時間は合計。0点でも存在は反映）
+                // 3) 集計（A/B 票数・勝者・回答者数）
+                var counts = new Dictionary<string, int> { ["A"] = 0, ["B"] = 0 };
+                foreach (var r in snapshot)
+                {
+                    if (r.SelectedOption is "A" or "B") counts[r.SelectedOption]++;
+                }
+                var winner = counts["A"] == counts["B"] ? "tie" : (counts["A"] > counts["B"] ? "A" : "B");
+                var voters = snapshot.Count;
+
+                // 4) チーム別の累積（トータル）を更新
                 foreach (var r in snapshot)
                 {
                     var key = (r.TeamName ?? "").Trim();
                     if (string.IsNullOrEmpty(key)) continue;
 
-                    _aggregateTotals.AddOrUpdate(key,
+                    _aggregateTotals.AddOrUpdate(
+                        key,
                         _ => (r.Points, r.ResponseTime),
-                        (_, cur) => (cur.Points + r.Points, cur.Time + r.ResponseTime));
+                        (_, cur) => (cur.Points + r.Points, cur.Time + r.ResponseTime)
+                    );
                 }
 
+                // 5) 「結果スナップショット」を別辞書にも保存（State に同梱できる形）
+                //    ※ フィールドに: private readonly ConcurrentDictionary<int, ResultDto> _resultsByIndex = new();
+                _resultsByIndex[_currentIndex] = new ResultDto
+                {
+                    index = _currentIndex,
+                    finalizedAtUtc = DateTime.UtcNow,
+                    counts = new Dictionary<string, int>(counts),
+                    winner = winner,
+                    voters = voters
+                };
+
+                // 6) 既存のイベント（互換維持）
                 await Clients.All.SendAsync("VotingStatusChanged", false);
                 await Clients.All.SendAsync("QuestionResults", _currentIndex, snapshot);
                 if (broadcastModal)
@@ -536,14 +768,20 @@ namespace GEChoice.Hubs
                     _resultsShown[_currentIndex] = true;
                     await Clients.All.SendAsync("ShowPerQuestionResults", _currentIndex, snapshot);
                 }
+
+                // 7) 中間トータルの再配信＆永続化
                 await BroadcastInterimTotals();
-                await SaveGameStateToFile();  // 回答確定時に保存
+                await SaveGameStateToFile();
+
+                // 8) ★重要★ 確定直後に最新 State を全体へ配信（リロード復帰で結果が消えないように）
+                await Clients.All.SendAsync("StateUpdated", BuildState());
             }
             finally
             {
                 _finalizeSemaphore.Release();
             }
         }
+
 
         // 途中経過
         private Task BroadcastInterimTotals()
@@ -582,47 +820,101 @@ namespace GEChoice.Hubs
         }
 
         // 参加者の回答反映
+        //private List<object> BuildParticipants()
+        //{
+        //    var list = new List<(long seq, object row)>();
+
+        //    foreach (var connId in _connections.Keys)
+        //    {
+        //        var seq = _arrivalSeq.TryGetValue(connId, out var s) ? s : long.MaxValue;
+
+        //        // チーム名（未設定はスキップ）
+        //        var raw = _teamNames.TryGetValue(connId, out var t) ? (t ?? "") : "";
+        //        if (string.IsNullOrWhiteSpace(raw))
+        //        {
+        //            continue;  // チーム名未設定の接続は参加者一覧に表示しない
+        //        }
+        //        var team = raw.Trim();
+
+        //        // 回答状況（この接続IDで回答していれば反映）
+        //        var uid = ConnToUid.TryGetValue(connId, out var u) ? u : connId;
+        //        bool has = _clientVotes.TryGetValue(uid, out var v);
+        //        var row = new
+        //        {
+        //            teamName = team,
+        //            hasAnswered = has,
+        //            selectedOption = has ? v!.SelectedOption : "-",
+        //            multiplier = has ? v!.Multiplier : 0,
+        //            responseTime = has ? v!.ResponseTime : 0d
+        //        };
+
+        //        list.Add((seq, row));
+        //    }
+
+        //    return list.OrderBy(x => x.seq).Select(x => x.row).Cast<object>().ToList();
+        //}
+
+        // 参加者の回答反映（チーム単位で一意化）
         private List<object> BuildParticipants()
         {
-            var list = new List<(long seq, object row)>();
+            // 1) 既知のチーム名（UID→Team）をすべて拾う
+            var teams = UidToTeam
+                .Where(kv => !string.IsNullOrWhiteSpace(kv.Value))
+                .Select(kv => new { uid = kv.Key, team = kv.Value!.Trim() })
+                .ToList();
 
-            foreach (var connId in _connections.Keys)
-            {
-                var seq = _arrivalSeq.TryGetValue(connId, out var s) ? s : long.MaxValue;
-
-                // チーム名（未設定はスキップ）
-                var raw = _teamNames.TryGetValue(connId, out var t) ? (t ?? "") : "";
-                if (string.IsNullOrWhiteSpace(raw))
+            // 2) team 単位にグルーピングし、最新（又は最も長く生きている）投票を代表として採用
+            var rows = teams
+                .GroupBy(x => x.team, StringComparer.Ordinal)
+                .Select(g =>
                 {
-                    continue;  // チーム名未設定の接続は参加者一覧に表示しない
-                }
-                var team = raw.Trim();
+                    // g に含まれる uid の中から、_clientVotes の「最後に回答したもの」を代表に
+                    var votes = g
+                        .Select(x => _clientVotes.TryGetValue(x.uid, out var v) ? v : null)
+                        .Where(v => v != null)
+                        .ToList();
 
-                // 回答状況（この接続IDで回答していれば反映）
-                bool has = _clientVotes.TryGetValue(connId, out var v);
-                var row = new
-                {
-                    teamName = team,
-                    hasAnswered = has,
-                    selectedOption = has ? v!.SelectedOption : "-",
-                    multiplier = has ? v!.Multiplier : 0,
-                    responseTime = has ? v!.ResponseTime : 0d
-                };
+                    var latest = votes.Count > 0
+                        ? votes.OrderBy(v => v!.ResponseTime).Last()   // ResponseTime は同一設問内で単調増加する
+                        : null;
 
-                list.Add((seq, row));
-            }
+                    return (seq: 0L, row: new
+                    {
+                        teamName = g.Key,
+                        hasAnswered = latest != null,
+                        selectedOption = latest?.SelectedOption ?? "-",
+                        multiplier = latest?.Multiplier ?? 0,
+                        responseTime = latest?.ResponseTime ?? 0d
+                    });
+                })
+                .OrderBy(x => x.row.teamName, StringComparer.Ordinal)  // 表示の安定化
+                .Select(x => (object)x.row)
+                .ToList();
 
-            return list.OrderBy(x => x.seq).Select(x => x.row).Cast<object>().ToList();
+            return rows;
         }
 
         // クライアントへ配信する現在の状態の情報設定
-        private object BuildState()
+        private StateDto BuildState()
         {
             var q = _questions[_currentIndex];
 
-            var counts = new Dictionary<string, int> { { "A", 0 }, { "B", 0 } };
-            foreach (var v in _answers.Values)
-                if (counts.ContainsKey(v)) counts[v]++;
+            //var counts = new Dictionary<string, int> { { "A", 0 }, { "B", 0 } };
+            //foreach (var v in _answers.Values)
+            //    if (counts.ContainsKey(v)) counts[v]++;
+
+            // 確定済みならスナップショットから、未確定なら現在投票から集計
+            var counts = new Dictionary<string, int> { ["A"] = 0, ["B"] = 0 };
+            if (_questionResults.TryGetValue(_currentIndex, out var snap) && snap != null)
+            {
+                foreach (var r in snap)
+                    if (r.SelectedOption is "A" or "B") counts[r.SelectedOption]++;
+            }
+            else
+            {
+                foreach (var v in _clientVotes.Values)
+                    if (v.SelectedOption is "A" or "B") counts[v.SelectedOption]++;
+            }
 
             // クライアント投票（チーム名で集約）
             var grouped = _clientVotes.Values
@@ -630,17 +922,25 @@ namespace GEChoice.Hubs
                 .GroupBy(v => (v.TeamName ?? "").Trim())
                 .ToDictionary(
                     g => g.Key,
-                    g => {
-                        var v = g.Last();
-                        return new
-                        {
-                            clientId = "",
-                            teamName = g.Key,
-                            selectedOption = v.SelectedOption,
-                            multiplier = v.Multiplier,
-                            responseTime = v.ResponseTime
-                        };
+                    g => (object)new
+                    {
+                        clientId = "",
+                        teamName = g.Key,
+                        selectedOption = g.Last().SelectedOption,
+                        multiplier = g.Last().Multiplier,
+                        responseTime = g.Last().ResponseTime
                     });
+
+            var resultsByIndex = _resultsByIndex.ToDictionary(
+                kv => kv.Key.ToString(),
+                kv => (object)new
+                {
+                    index = kv.Value.index,
+                    finalizedAtUtc = kv.Value.finalizedAtUtc,
+                    counts = kv.Value.counts,
+                    winner = kv.Value.winner,
+                    voters = kv.Value.voters
+                });
 
             // ★ 追加: 使われた点数（1/2/4）のスナップショットをチーム単位で配信
             // HashSet の列挙は lock して配信用に配列へコピー
@@ -653,20 +953,19 @@ namespace GEChoice.Hubs
                 );
             }
 
-            return new
+            return new StateDto
             {
                 currentIndex = _currentIndex,
                 totalQuestions = _questions.Count,
                 question = new { title = q.Title, options = q.Options.Select(o => new { label = o }) },
-                counts,
+                counts = counts,
                 isVotingOpen = _isVotingOpen,
                 votingStartTime = _votingStartUtc,
                 clientVotes = grouped,
-
-                // ★ 追加フィールド
                 usedMultipliersByTeam = usedByTeam,
                 isQuestionFinalized = _questionResults.ContainsKey(_currentIndex),
-                isQuestionStarted = _questionStarted.ContainsKey(_currentIndex) && _questionStarted[_currentIndex]
+                isQuestionStarted = _questionStarted.TryGetValue(_currentIndex, out var st) && st,
+                resultsByIndex = resultsByIndex
             };
         }
 
